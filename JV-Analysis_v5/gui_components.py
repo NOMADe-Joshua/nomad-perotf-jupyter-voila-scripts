@@ -6,6 +6,7 @@ Contains all UI components for the JV Analysis Dashboard.
 __author__ = "Edgar Nandayapa"
 __institution__ = "Helmholtz-Zentrum Berlin"
 __created__ = "August 2025"
+#adjusted by Joshua from KIT :)
 
 import ipywidgets as widgets
 from IPython.display import display, clear_output, HTML, Markdown
@@ -141,7 +142,7 @@ class AuthenticationUI:
         self.settings_toggle_button.layout.width = '200px'
         
         self.settings_content = widgets.VBox([
-            widgets.HTML("<p><strong>SE Oasis:</strong> https://nomad-hzb-se.de/nomad-oasis/api/v1</p>"),
+            widgets.HTML("<p><strong>Oasis API:</strong> http://elnserver.lti.kit.edu/nomad-oasis/api/v1</p>"),
             self.auth_method_selector,
             self.local_auth_box,
             self.token_auth_box,

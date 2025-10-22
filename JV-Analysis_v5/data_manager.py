@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 import os
 import operator
-import sys
+import sys 
 
 # Add parent directory for shared modules
 parent_dir = os.path.dirname(os.getcwd())
@@ -87,8 +87,8 @@ class DataManager:
             token = self.auth_manager.current_token
             
             # Get sample IDs and descriptions
-            sample_ids = get_ids_in_batch(url, token, batch_ids)
-            identifiers = get_sample_description(url, token, sample_ids)
+            sample_ids = get_ids_in_batch(url, token, batch_ids)  # <-- Holt Sample-IDs für Batch
+            identifiers = get_sample_description(url, token, sample_ids)  # <-- Holt Variation/Description für Samples
             
             df_jvc, df_cur = self._process_jv_data_for_analysis(sample_ids, output_widget, batch_ids)
             
@@ -168,6 +168,8 @@ class DataManager:
                     batch_sample_ids = get_ids_in_batch(url, token, [batch_id])
                     batch_jvs = get_all_JV(url, token, batch_sample_ids)
                     
+                    #HIER FEHLENDE JV ID WEGFILTERN! TODO
+                    
                     # Merge this batch's data into the main collection
                     all_jvs.update(batch_jvs)
                     successful_batches.append(batch_id)
@@ -197,12 +199,26 @@ class DataManager:
                     with output_widget:
                         print("❌ No valid JV data could be loaded from any batch")
                 return pd.DataFrame(), pd.DataFrame()
-            
+            '''
             # First pass: determine maximum number of data points across all curves
             max_data_points = 0
             for sid in sample_ids:
                 jv_res = all_jvs.get(sid, [])
                 for jv_data, jv_md in jv_res:
+                    for c in jv_data["jv_curve"]:
+                        max_data_points = max(max_data_points, len(c["voltage"]), len(c["current_density"]))
+            '''
+            
+            max_data_points = 0
+            for sid in sample_ids:
+                jv_res = all_jvs.get(sid, [])
+                for jv_data, jv_md in jv_res:
+                    #make sure JV curve exists
+                    if not jv_data or "jv_curve" not in jv_data or not jv_data["jv_curve"]:
+                        if output_widget:
+                            with output_widget:
+                                print(f"⚠️ Sample {sid} hat keine JV-Kurve – wird übersprungen.")
+                        continue
                     for c in jv_data["jv_curve"]:
                         max_data_points = max(max_data_points, len(c["voltage"]), len(c["current_density"]))
             
@@ -218,6 +234,20 @@ class DataManager:
                         print(f"Processing: {sid}")
                 
                 for jv_data, jv_md in jv_res:
+                    # Skip if jv_data is None or doesn't contain jv_curve
+                    if not jv_data or "jv_curve" not in jv_data:
+                        if output_widget:
+                            with output_widget:
+                                print(f"⚠️ Sample {sid} has no JV curve data - skipping")
+                        continue
+                    
+                    # Skip if jv_curve is empty
+                    if not jv_data["jv_curve"]:
+                        if output_widget:
+                            with output_widget:
+                                print(f"⚠️ Sample {sid} has empty JV curve - skipping")
+                        continue
+                    
                     status = extract_status_from_metadata(jv_data, jv_md)
                     for c in jv_data["jv_curve"]:
                         file_name = os.path.join("../", jv_md["upload_id"], jv_data.get("data_file"))

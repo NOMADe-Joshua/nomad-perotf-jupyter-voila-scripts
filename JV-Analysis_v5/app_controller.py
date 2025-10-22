@@ -3,9 +3,9 @@ Simplified Application Controller
 Main orchestrator for the JV Analysis Dashboard with cleaner organization.
 """
 
-__author__ = "Edgar Nandayapa"
-__institution__ = "Helmholtz-Zentrum Berlin"
-__created__ = "August 2025"
+__author__ = "Stolen by Joshua"
+__institution__ = "HZb -> KIT"
+__created__ = "September 2025"
 
 import ipywidgets as widgets
 from IPython.display import display, clear_output, Markdown
@@ -119,7 +119,7 @@ class JVAnalysisApp:
     
     def __init__(self):
         # Initialize core components
-        self.auth_manager = SimpleAuthManager("https://nomad-hzb-se.de", "/nomad-oasis/api/v1")
+        self.auth_manager = SimpleAuthManager("http://elnserver.lti.kit.edu", "/nomad-oasis/api/v1")
         self.data_manager = DataManager(self.auth_manager)
         
         # Application state
