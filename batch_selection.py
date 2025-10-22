@@ -1,5 +1,18 @@
 import ipywidgets as widgets
 from api_calls import get_batch_ids
+import re
+
+def extract_date(s):
+    # Suche nach jedem 8-stelligen Datum, das mit "20" beginnt
+    match = re.search(r'20\d{6}', s)
+    return int(match.group()) if match else None
+
+def sort_by_date_desc(data_list):
+    return sorted(
+        data_list,
+        key=lambda x: extract_date(x) if extract_date(x) else 0,
+        reverse=True
+    )
 
 def create_batch_selection(url, token, load_data_function):
     # Get batch IDs
@@ -9,6 +22,7 @@ def create_batch_selection(url, token, load_data_function):
         if "_".join(b.split("_")[:-1]) in batch_ids_list_tmp:
             continue
         batch_ids_list.append(b)
+    batch_ids_list = sort_by_date_desc(batch_ids_list)
 
     # Create widgets
     batch_ids_selector = widgets.SelectMultiple(

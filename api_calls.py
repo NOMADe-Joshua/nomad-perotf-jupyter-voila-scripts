@@ -379,7 +379,7 @@ def get_all_measurements_except_JV(url, token, sample_ids):
         res[lab_id].append((ldata["archive"]["data"],ldata["archive"]["metadata"]))
     return res
 
-def get_all_eqe(url, token, sample_ids):
+def get_all_eqe(url, token, sample_ids, eqe_type="peroTF_EQEmeasurement"):
     """
     Fetch all EQE data for given sample_ids.
     Filters out measurements where all relevant parameters are NaN or "nan".
