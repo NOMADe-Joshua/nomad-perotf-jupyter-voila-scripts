@@ -275,6 +275,7 @@ def get_specific_data_of_sample(url, token, sample_id, entry_type, with_meta=Fal
     return res
 
 def get_all_JV(url, token, sample_ids, jv_type="peroTF_JVmeasurement"):
+    '''
     # collect the results of the sample, in this case it are all the annealing temperatures
     def process_jv_with_metadata(jv_data_with_metadata):
         """
@@ -294,6 +295,7 @@ def get_all_JV(url, token, sample_ids, jv_type="peroTF_JVmeasurement"):
                 processed_data.append(data)
         
         return processed_data
+    '''
     
     query = {
         'required': {
