@@ -8,7 +8,7 @@ STRINGS = {
     'STATUS_AUTH_CHANGED': 'Status: Not Authenticated (Method changed)',
     'STATUS_AUTHENTICATING': 'Status: Authenticating...',
     'AUTH_REQUIRED': 'Authentication required. Please authenticate first in Connection Settings.',
-    'SE_OASIS_URL': 'https://nomad-hzb-se.de',
+    'SE_OASIS_URL': 'http://elnserver.lti.kit.edu',
     'API_ENDPOINT': '/nomad-oasis/api/v1',
     'DATA_LOADED_SUCCESS': 'Data Loaded Successfully!',
     'LOADING_DATA': 'Loading Data',
