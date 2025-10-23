@@ -181,7 +181,7 @@ def add_guide_sheet(workbook):
     guide_row = row + 1  # next row for How-to-guide
 
     guide_ws.cell(row=voila_row, column=1, value='• File Uploader Voila Dashboard')
-    guide_ws.cell(row=voila_row, column=1).hyperlink = 'https://nomad-hzb-se.de/nomad-oasis/gui/search/voila'
+    guide_ws.cell(row=voila_row, column=1).hyperlink = 'http://elnserver.lti.kit.edu/nomad-oasis/gui/search/voila'
     guide_ws.cell(row=voila_row, column=1).style = 'Hyperlink'
 
     guide_ws.cell(
