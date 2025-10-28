@@ -19,12 +19,13 @@ class MinimalistExperimentBuilder:
         self.current_sequence = []
         self.templates = {}
         
-        # Available process types
+        # Available process types - updated to match Create_Excel_Script_1.py
         processes = [
             'Spin Coating', 'Evaporation', 'Sputtering', 'ALD',
             'Cleaning O2-Plasma', 'Cleaning UV-Ozone', 'Inkjet Printing',
-            'Slot Die Coating', 'Dip Coating', 'Laser Scribing', 'Co-Evaporation',
-            'Ink Recycling', 'Annealing', 'Generic Process'
+            'Slot Die Coating', 'Dip Coating', 'Laser Scribing', 
+            'Co-Evaporation', 'Seq-Evaporation', 'Close Space Sublimation',
+            'Lamination', 'Annealing', 'Generic Process', 'Multijunction Info'
         ]
         self.available_processes = ['Experiment Info'] + sorted(processes)
         
@@ -71,25 +72,39 @@ class MinimalistExperimentBuilder:
                         {"process": "Experiment Info"}
                     ]
                 },
-                "test_process": {
-                    "name": "Test Process",
-                    "description": "Simple test process",
-                    "category": "Test Processes",
-                    "process_sequence": [
-                        {"process": "Experiment Info"},
-                        {"process": "Spin Coating", "config": {"solvents": 2, "solutes": 3, "spinsteps": 1, "antisolvent": True}},
-                        {"process": "Evaporation"}
-                    ]
-                },
                 "simple_coating": {
                     "name": "Simple Coating",
                     "description": "Basic coating process",
                     "category": "Coating Processes",
                     "process_sequence": [
                         {"process": "Experiment Info"},
-                        {"process": "Cleaning O2-Plasma", "config": {"solvents": 2}},
+                        {"process": "Cleaning O2-Plasma", "config": {"solvents": 1}},
                         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1}},
                         {"process": "Evaporation"}
+                    ]
+                },
+                "multijunction_cell": {
+                    "name": "Multijunction Cell",
+                    "description": "Complete multijunction solar cell process",
+                    "category": "Solar Cell Processes",
+                    "process_sequence": [
+                        {"process": "Experiment Info"},
+                        {"process": "Multijunction Info"},
+                        {"process": "Cleaning O2-Plasma", "config": {"solvents": 2}},
+                        {"process": "Spin Coating", "config": {"solvents": 2, "solutes": 2, "spinsteps": 2, "antisolvent": True}},
+                        {"process": "Co-Evaporation", "config": {"materials": 2}},
+                        {"process": "Annealing"}
+                    ]
+                },
+                "sublimation_process": {
+                    "name": "Close Space Sublimation",
+                    "description": "CSS deposition process",
+                    "category": "Deposition Processes",
+                    "process_sequence": [
+                        {"process": "Experiment Info"},
+                        {"process": "Cleaning UV-Ozone", "config": {"solvents": 1}},
+                        {"process": "Close Space Sublimation"},
+                        {"process": "Annealing"}
                     ]
                 }
             }
@@ -323,19 +338,19 @@ class MinimalistExperimentBuilder:
         numeric_controls = []
         checkbox_controls = []
         
-        # Check if process has configuration options
+        # Check if process has configuration options - updated list
         configurable_processes = [
             'Spin Coating', 'Cleaning O2-Plasma', 'Cleaning UV-Ozone', 
-            'Inkjet Printing', 'Co-Evaporation', 'Ink Recycling', 'Slot Die Coating'
+            'Inkjet Printing', 'Co-Evaporation', 'Seq-Evaporation', 'Slot Die Coating', 'Dip Coating'
         ]
         
         if process_name not in configurable_processes:
             return numeric_controls, checkbox_controls
         
         # Solvents
-        if process_name in ['Spin Coating', 'Cleaning O2-Plasma', 'Cleaning UV-Ozone', 'Inkjet Printing', 'Ink Recycling', 'Slot Die Coating']:
+        if process_name in ['Spin Coating', 'Cleaning O2-Plasma', 'Cleaning UV-Ozone', 'Inkjet Printing', 'Slot Die Coating', 'Dip Coating']:
             solvents_widget = widgets.BoundedIntText(
-                value=config.get('solvents', 0),
+                value=config.get('solvents', 1),
                 min=0, max=20,
                 description='Solvents:',
                 style={'description_width': '55px'},
@@ -348,9 +363,9 @@ class MinimalistExperimentBuilder:
             numeric_controls.append(solvents_widget)
         
         # Solutes
-        if process_name in ['Spin Coating', 'Inkjet Printing', 'Ink Recycling', 'Slot Die Coating']:
+        if process_name in ['Spin Coating', 'Inkjet Printing', 'Slot Die Coating', 'Dip Coating']:
             solutes_widget = widgets.BoundedIntText(
-                value=config.get('solutes', 0),
+                value=config.get('solutes', 1),
                 min=0, max=20,
                 description='Solutes:',
                 style={'description_width': '50px'},
@@ -377,10 +392,10 @@ class MinimalistExperimentBuilder:
             )
             numeric_controls.append(spinsteps_widget)
         
-        # Materials (for Co-Evaporation)
-        if process_name == 'Co-Evaporation':
+        # Materials (for Co-Evaporation and Seq-Evaporation)
+        if process_name in ['Co-Evaporation', 'Seq-Evaporation']:
             materials_widget = widgets.BoundedIntText(
-                value=config.get('materials', 1),
+                value=config.get('materials', 2),
                 min=1, max=10,
                 description='Materials:',
                 style={'description_width': '65px'},
@@ -392,20 +407,20 @@ class MinimalistExperimentBuilder:
             )
             numeric_controls.append(materials_widget)
         
-        # Precursors (for Ink Recycling)
-        if process_name == 'Ink Recycling':
-            precursors_widget = widgets.BoundedIntText(
-                value=config.get('precursors', 0),
-                min=0, max=10,
-                description='Precursors:',
-                style={'description_width': '70px'},
-                layout=widgets.Layout(width='135px')
+        # Wf Number of Pulses (for Inkjet Printing)
+        if process_name == 'Inkjet Printing':
+            pulses_widget = widgets.BoundedIntText(
+                value=config.get('Wf Number of Pulses', 1),
+                min=1, max=10,
+                description='Pulses:',
+                style={'description_width': '50px'},
+                layout=widgets.Layout(width='115px')
             )
-            precursors_widget.observe(
-                lambda change, idx=index: self._update_config(idx, 'precursors', change['new']), 
+            pulses_widget.observe(
+                lambda change, idx=index: self._update_config(idx, 'Wf Number of Pulses', change['new']), 
                 names='value'
             )
-            numeric_controls.append(precursors_widget)
+            numeric_controls.append(pulses_widget)
         
         # Checkboxes for Spin Coating
         if process_name == 'Spin Coating':
@@ -431,36 +446,36 @@ class MinimalistExperimentBuilder:
         # Checkboxes for Inkjet Printing
         if process_name == 'Inkjet Printing':
             checkbox_options = [
-                ('annealing', 'Annealing'),
-                ('gavd', 'GAVD')
+                ('gasquenching', 'Gas Quenching'),
+                ('vacuumquenching', 'Vacuum Quenching')
             ]
+            
+            # pixORnotion dropdown
+            pixor_dropdown = widgets.Dropdown(
+                options=['Pixdro', 'Notion'],
+                value=config.get('pixORnotion', 'Pixdro'),
+                description='Type:',
+                style={'description_width': '40px'},
+                layout=widgets.Layout(width='120px')
+            )
+            pixor_dropdown.observe(
+                lambda change, idx=index: self._update_config(idx, 'pixORnotion', change['new']), 
+                names='value'
+            )
+            numeric_controls.append(pixor_dropdown)
             
             for option_key, option_label in checkbox_options:
                 checkbox = widgets.Checkbox(
                     value=config.get(option_key, False),
                     description=option_label,
                     style={'description_width': 'initial'},
-                    layout=widgets.Layout(width='100px')
+                    layout=widgets.Layout(width='140px')
                 )
                 checkbox.observe(
                     lambda change, idx=index, key=option_key: self._update_config(idx, key, change['new']), 
                     names='value'
                 )
                 checkbox_controls.append(checkbox)
-        
-        # Carbon paste for Evaporation
-        if process_name == 'Evaporation':
-            checkbox = widgets.Checkbox(
-                value=config.get('carbon_paste', False),
-                description='Carbon Paste',
-                style={'description_width': 'initial'},
-                layout=widgets.Layout(width='130px')
-            )
-            checkbox.observe(
-                lambda change, idx=index: self._update_config(idx, 'carbon_paste', change['new']), 
-                names='value'
-            )
-            checkbox_controls.append(checkbox)
         
         return numeric_controls, checkbox_controls
     
@@ -512,13 +527,13 @@ class MinimalistExperimentBuilder:
         """Get default configuration for a process"""
         defaults = {
             'Spin Coating': {'solvents': 1, 'solutes': 1, 'spinsteps': 1, 'antisolvent': False, 'gasquenching': False, 'vacuumquenching': False},
-            'Cleaning O2-Plasma': {'solvents': 2},
-            'Cleaning UV-Ozone': {'solvents': 2},
-            'Inkjet Printing': {'solvents': 1, 'solutes': 1, 'annealing': False, 'gavd': False},
+            'Cleaning O2-Plasma': {'solvents': 1},
+            'Cleaning UV-Ozone': {'solvents': 1},
+            'Inkjet Printing': {'solvents': 1, 'solutes': 1, 'pixORnotion': 'Pixdro', 'Wf Number of Pulses': 1, 'gasquenching': False, 'vacuumquenching': False},
             'Slot Die Coating': {'solvents': 1, 'solutes': 1},
+            'Dip Coating': {'solvents': 1, 'solutes': 1},
             'Co-Evaporation': {'materials': 2},
-            'Ink Recycling': {'solvents': 1, 'solutes': 1, 'precursors': 1},
-            'Evaporation': {'carbon_paste': False}
+            'Seq-Evaporation': {'materials': 2}
         }
         return defaults.get(process_name, {})
     
@@ -603,7 +618,10 @@ class MinimalistExperimentBuilder:
                 with self.status_output:
                     print("🔄 Using ExperimentExcelBuilder (full detailed format)...")
                 
-                builder = ExperimentExcelBuilder(self.current_sequence, self.is_testing_checkbox.value)
+                # Import the process config from Create_Excel_Script_1.py
+                from Create_Excel_Script_1 import process_config
+                
+                builder = ExperimentExcelBuilder(self.current_sequence, process_config)
                 builder.build_excel()
                 
                 buffer = io.BytesIO()
