@@ -608,6 +608,52 @@ class MinimalistExperimentBuilder:
                 print(f"❌ Error in _on_generate_excel: {e}")
                 import traceback
                 traceback.print_exc()
+            
+    def process_config_function(self):
+        # Define the base process configuration
+        process_config = {
+            "Experiment Info": {"steps": ["Date", "Project_Name", "Batch", "Subbatch", "Sample", "Nomad ID", "Variation",
+                                        "Sample dimension", "Sample area [cm^2]", "Number of pixels", "Pixel area", "Number of junctions", "Substrate material",
+                                        "Substrate conductive layer", "Bottom Cell Name", "Notes"]},
+            "Multijunction Info": {"steps": ["Recombination Layer", "Notes"]}, 
+            "Cleaning O2-Plasma": {"solvents": 1},
+            "Cleaning UV-Ozone": {"solvents": 1},
+            
+            "Dip Coating": {"solvents": 1, "solutes": 1}, 
+            "Spin Coating": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": False, "gasquenching": 0, "vacuumquenching": 0}, 
+            "Slot Die Coating": {"solvents": 1, "solutes": 1},  
+            "Inkjet Printing": {"solvents": 1, "solutes": 1, "pixORnotion": "Pixdro", "Wf Number of Pulses":1 , "vacuumquenching": 0, "gasquenching": 0}, #ToDo Extend Pulse variations 
+
+            "Evaporation": {"steps": ["Material name", "Layer type", "Tool/GB name", "Organic", "Base pressure [bar]", "Pressure start [bar]", "Pressure end [bar]",
+                                    "Source temperature start[°C]", "Source temperature end[°C]", "Substrate temperature [°C]", "Thickness [nm]",
+                                    "Rate [angstrom/s]", "Power [%]", "Tooling factor", "Notes"]},  
+            # Added DB 2024-11-29  multiple materials #Could also be called Co-Sublimation instead of Co-Evaporation
+            "Co-Evaporation": {"materials": 2},
+            # Added DB 2024-11-29  multiple materials #Could also be called Seq-Sublimation instead of Seq-Evaporation
+            "Seq-Evaporation": {"materials": 2},
+            "Close Space Sublimation": {"steps": ["Material name", "Layer type", "Tool/GB name", "Organic", "Process pressure [bar]",
+                                    "Source temperature [°C]", "Substrate temperature [°C]", "Material state", "Substrate source distance [mm]",
+                                    "Thickness [nm]", "Deposition Time [s]", "Carrier gas", "Notes"]},
+
+            "Lamination": {"steps": ["Interface", "Tool/GB name", "Temperature during process[°C]",  "Temperature at pressure relief [°C]", "Pressure [MPa]", "Force [N]",  
+                                    "Time lamination [s]", "Heat up time [s]", "Cool down time [s]", "Total time [s]", "Athmosphere in chamber", "Humidity [%%rel]",
+                                    "Stamp 1 Material", "Stamp 1 Thickness [mm]", "Stamp 1 Area [mm^2]", "Stamp 2 Material", "Stamp 2 Thickness [mm]", "Stamp 2 Area [mm^2]",
+                                    "Homogeniously pressed [1/0]", "Sucessful adhesion [1/0]", "Notes"]},
+
+            "Sputtering": {"steps": ["Material name", "Layer type", "Tool/GB name", "Gas", "Temperature [°C]", "Pressure [mbar]",
+                                    "Deposition time [s]", "Burn in time [s]", "Power [W]", "Rotation rate [rpm]",
+                                    "Thickness [nm]", "Gas flow rate [cm^3/min]", "Notes"]},
+            "Laser Scribing": {"steps": ["Laser wavelength [nm]", "Laser pulse time [ps]", "Laser pulse frequency [kHz]",
+                            "Speed [mm/s]", "Fluence [J/cm2]", "Power [%]", "Recipe file"]},
+            "ALD": {"steps": ["Material name", "Layer type", "Tool/GB name", "Source", "Thickness [nm]", "Temperature [°C]", "Rate [A/s]",
+                            "Time [s]", "Number of cycles", "Precursor 1", "Pulse duration 1 [s]",
+                            "Manifold temperature 1 [°C]", "Bottle temperature 1 [°C]", "Precursor 2 (Oxidizer/Reducer)", "Pulse duration 2 [s]",
+                            "Manifold temperature 2 [°C]"]},
+            "Annealing": {"steps": ["Annealing time [min]", "Annealing temperature [°C]", "Annealing athmosphere", "Relative humidity [%]", "Notes"]}, # Added DB 2024-11-29 Annealing
+
+            "Generic Process": {"steps": ["Name", "Notes"]}
+        }
+        return process_config
 
     def _generate_excel_data(self):
         """Generate Excel file using ExperimentExcelBuilder first, then openpyxl fallback"""
@@ -619,7 +665,7 @@ class MinimalistExperimentBuilder:
                     print("🔄 Using ExperimentExcelBuilder (full detailed format)...")
                 
                 # Import the process config from Create_Excel_Script_1.py
-                from Create_Excel_Script_1 import process_config
+                process_config = self.process_config_function()
                 
                 builder = ExperimentExcelBuilder(self.current_sequence, process_config)
                 builder.build_excel()
