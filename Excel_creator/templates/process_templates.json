@@ -14,7 +14,7 @@
 		]
 	},
     "Spinbot": {
-      "name": "Spinbot Standard",
+      "name": "Spinbot Standard Joshua",
       "description": "Joshua E and Daniel B Spinbot process",
       "category": "Spin Coating",
       "researcher": "Joshua Damm",
@@ -32,7 +32,7 @@
       ]
     },
     "CSS1": {
-      "name": "CSS Organic Standard",
+      "name": "CSS Organic Standard Joshua",
       "description": "Standard organic CSS",
       "category": "Close Space Sublimation Organic",
       "researcher": "Joshua Damm",
@@ -45,6 +45,23 @@
         {"process": "Close Space Sublimation"},
         {"process": "Annealing"},
         {"process": "Seq-Evaporation", "config": {"materials": 2}},
+        {"process": "Evaporation"}
+      ]
+    },
+    "Lamination": {
+      "name": "Lamination Hendrik",
+      "description": "Standard lamination process",
+      "category": "Lamination",
+      "researcher": "Joshua Damm",
+      "process_sequence": [
+        {"process": "Experiment Info"},
+        {"process": "Cleaning UV-Ozone", "config": {"solvents": 2}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 2, "solutes": 5, "spinsteps": 2, "antisolvent": true}},
+        {"process": "Lamination"},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"},
         {"process": "Evaporation"}
       ]
     }
