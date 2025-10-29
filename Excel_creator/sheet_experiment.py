@@ -51,16 +51,16 @@ def add_experiment_sheet(workbook, process_sequence, is_testing=False):
             return [
                 make_label('Date', 'YYYYMMDD'),
                 make_label('Project_Name', 'NaMe'),
-                make_label('Batch', '0'),
-                make_label('Subbatch', '0'),
-                make_label('Sample', '0'),
+                make_label('Batch', 0),
+                make_label('Subbatch', 0),
+                make_label('Sample', 0),
                 make_label('Nomad ID', ''),
                 make_label('Variation', 'readable variation'),
                 make_label('Sample dimension', '16x16'), 
-                make_label('Sample area [cm^2]', '0.105'),
-                make_label('Number of pixels', '4'),
-                make_label('Pixel area', '0.105'),
-                make_label('Number of junctions', '1'),
+                make_label('Sample area [cm^2]', 0.105),
+                make_label('Number of pixels', 4),
+                make_label('Pixel area', 0.105),
+                make_label('Number of junctions', 1),
                 make_label('Substrate material', 'Glass'),
                 make_label('Substrate conductive layer', 'ITO'),
                 make_label('Bottom Cell Name', ''),
@@ -78,8 +78,8 @@ def add_experiment_sheet(workbook, process_sequence, is_testing=False):
             for i in range(1, config.get('solvents', 1) + 1):
                 steps.extend([
                     make_label(f'Solvent {i}', ''),
-                    make_label(f'Time {i} [s]', '900'),
-                    make_label(f'Temperature {i} [°C]', '40'),
+                    make_label(f'Time {i} [s]', 900),
+                    make_label(f'Temperature {i} [°C]', 40),
                 ])
 
             if process_name == 'Cleaning O2-Plasma':
@@ -89,7 +89,7 @@ def add_experiment_sheet(workbook, process_sequence, is_testing=False):
                     make_label('Gas-Plasma Power [W]', ''),
                 ])
             if process_name == 'Cleaning UV-Ozone':
-                steps.append(make_label('UV-Ozone Time [s]', '900'))
+                steps.append(make_label('UV-Ozone Time [s]', 900))
             return steps
 
         if process_name in ['Spin Coating', 'Dip Coating', 'Slot Die Coating', 'Inkjet Printing']:
@@ -307,11 +307,11 @@ def add_experiment_sheet(workbook, process_sequence, is_testing=False):
                 make_label('Layer type', ''),
                 make_label('Tool/GB name', 'Solvent GB'),
                 make_label('Organic', ''),
-                make_label('Process pressure [bar]', '4'),
+                make_label('Process pressure [bar]', 4),
                 make_label('Source temperature [°C]', ''),
                 make_label('Substrate temperature [°C]', ''),
                 make_label('Material state', ''),
-                make_label('Substrate source distance [mm]', '4'),
+                make_label('Substrate source distance [mm]', 4),
                 make_label('Thickness [nm]', ''),
                 make_label('Deposition Time [s]', ''),
                 make_label('Carrier gas', 'no'),
@@ -455,7 +455,7 @@ def add_experiment_sheet(workbook, process_sequence, is_testing=False):
 
     # Example: Apply a custom formula for the "Nomad ID" column (example only)
     for row in range(3, 4):
-        nomad_id_formula = f'=CONCATENATE("HZB_",B{row},"_",C{row},"_",D{row},"_",E{row})'
+        nomad_id_formula = f'=CONCATENATE("KIT_",B{row},"_",A{row},"_",C{row},"_",D{row},"_",E{row})'
         ws[f'F{row}'].value = nomad_id_formula
 
     # Adjust column widths
