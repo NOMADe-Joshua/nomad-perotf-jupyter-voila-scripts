@@ -13,10 +13,10 @@
 			{"process": "Experiment Info"}
 		]
 	},
-    "CSS1": {
-      "name": "Close Space Sublimation 1",
-      "description": "Close Space Sublimation standard process",
-      "category": "Close Space Sublimation",
+    "Spinbot": {
+      "name": "Spinbot Standard",
+      "description": "Joshua E and Daniel B Spinbot process",
+      "category": "Spin Coating",
       "researcher": "Joshua Damm",
       "process_sequence": [
         {"process": "Experiment Info"},
@@ -31,10 +31,10 @@
         {"process": "Evaporation"}
       ]
     },
-    "Spinbot": {
-      "name": "Spinbot Standard Process",
-      "description": "Joshua E. and Daniel B. standard Spinbot process",
-      "category": "Spin Coating",
+    "CSS1": {
+      "name": "CSS Organic Standard",
+      "description": "Standard organic CSS",
+      "category": "Close Space Sublimation Organic",
       "researcher": "Joshua Damm",
       "process_sequence": [
         {"process": "Experiment Info"},
