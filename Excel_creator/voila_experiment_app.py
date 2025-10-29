@@ -19,15 +19,15 @@ class MinimalistExperimentBuilder:
         self.current_sequence = []
         self.templates = {}
         
-        # Available process types - updated to match Create_Excel_Script_1.py
+        # Available process types - updated to include Seq-Evaporation
         processes = [
-            'Spin Coating', 'Evaporation', 'Sputtering', 'ALD',
-            'Cleaning O2-Plasma', 'Cleaning UV-Ozone', 'Inkjet Printing',
-            'Slot Die Coating', 'Dip Coating', 'Laser Scribing', 
-            'Co-Evaporation', 'Seq-Evaporation', 'Close Space Sublimation',
-            'Lamination', 'Annealing', 'Generic Process', 'Multijunction Info'
+            'Spin Coating', 'Evaporation', 'Co-Evaporation', 'Seq-Evaporation',
+            'Sputtering', 'ALD', 'Cleaning O2-Plasma', 'Cleaning UV-Ozone', 
+            'Inkjet Printing', 'Slot Die Coating', 'Dip Coating', 'Laser Scribing',
+            'Close Space Sublimation', 'Lamination', 'Annealing', 'Generic Process', 
+            'Multijunction Info'
         ]
-        self.available_processes = ['Experiment Info'] + sorted(processes)
+        self.available_processes = ['Experiment Info'] + processes
         
         self.setup_widgets()
         self.load_templates()
@@ -226,6 +226,18 @@ class MinimalistExperimentBuilder:
                 if "config" in process:
                     new_process["config"] = process["config"].copy()
                 self.current_sequence.append(new_process)
+            
+            # Debug: Check if Seq-Evaporation is in available processes
+            with self.status_output:
+                self.status_output.clear_output()
+                seq_evap_processes = [p for p in self.current_sequence if p["process"] == "Seq-Evaporation"]
+                if seq_evap_processes:
+                    print(f"🔍 Found {len(seq_evap_processes)} Seq-Evaporation processes")
+                    print(f"🔍 Available processes: {self.available_processes}")
+                    if "Seq-Evaporation" in self.available_processes:
+                        print("✅ Seq-Evaporation is in available processes")
+                    else:
+                        print("❌ Seq-Evaporation NOT in available processes")
             
             self._update_process_display()
             
@@ -516,7 +528,13 @@ class MinimalistExperimentBuilder:
             self.current_sequence[index]['process'] = new_process_type
             
             # Reset config when changing process type
-            if new_process_type in ['Spin Coating', 'Cleaning O2-Plasma', 'Cleaning UV-Ozone', 'Inkjet Printing', 'Slot Die Coating']:
+            configurable_processes = [
+                'Spin Coating', 'Cleaning O2-Plasma', 'Cleaning UV-Ozone', 
+                'Inkjet Printing', 'Slot Die Coating', 'Dip Coating',
+                'Co-Evaporation', 'Seq-Evaporation'
+            ]
+            
+            if new_process_type in configurable_processes:
                 self.current_sequence[index]['config'] = self._get_default_config(new_process_type)
             else:
                 self.current_sequence[index].pop('config', None)

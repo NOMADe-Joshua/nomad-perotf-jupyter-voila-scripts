@@ -298,6 +298,7 @@ def add_experiment_sheet(workbook, process_sequence, is_testing=False):
                     make_label(f'Rate {i} [angstrom/s]', ''),
                     make_label(f'Tooling factor {i}', '')
                 ])
+            steps.append(make_label('Notes', ''))
             return steps
 
         if process_name == 'Close Space Sublimation':

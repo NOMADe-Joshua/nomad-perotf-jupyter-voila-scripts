@@ -231,6 +231,35 @@ def add_guide_sheet(workbook):
     ]
     row = write_table(guide_ws, row, 'Co-Evaporation', co_evap)
 
+    # Seq-Evaporation (Sequential Evaporation)
+    seq_evap = [
+        ['Material name', 'Primary material', 'Text', '', 'CuI'],
+        ['Layer type', 'Type of layer', 'Text', '', 'Hole Transport Layer'],
+        ['Tool/GB name', 'Tool used', 'Text', '', 'IRIS Evap'],
+        ['Material name 1', 'First material (sequential)', 'Text', '', 'CuI'],
+        ['Base pressure 1', 'Base pressure for material 1', 'Number', 'bar', '1e-6'],
+        ['Pressure start 1', 'Start pressure for material 1', 'Number', 'bar', '5e-6'],
+        ['Pressure end 1', 'End pressure for material 1', 'Number', 'bar', '3e-6'],
+        ['Source temperature start 1', 'Source temp. start (material 1)', 'Number', '°C', '200'],
+        ['Source temperature end 1', 'Source temp. end (material 1)', 'Number', '°C', '210'],
+        ['Substrate temperature 1', 'Substrate temp. (material 1)', 'Number', '°C', '25'],
+        ['Thickness 1', 'Thickness of material 1', 'Number', 'nm', '30'],
+        ['Rate 1', 'Deposition rate (material 1)', 'Number', 'Å/s', '0.3'],
+        ['Tooling factor 1', 'Tooling factor (material 1)', 'Number', '', '1.2'],
+        ['Material name 2', 'Second material (sequential)', 'Text', '', 'CsPbI3'],
+        ['Base pressure 2', 'Base pressure for material 2', 'Number', 'bar', '1e-6'],
+        ['Pressure start 2', 'Start pressure for material 2', 'Number', 'bar', '5e-6'],
+        ['Pressure end 2', 'End pressure for material 2', 'Number', 'bar', '3e-6'],
+        ['Source temperature start 2', 'Source temp. start (material 2)', 'Number', '°C', '300'],
+        ['Source temperature end 2', 'Source temp. end (material 2)', 'Number', '°C', '310'],
+        ['Substrate temperature 2', 'Substrate temp. (material 2)', 'Number', '°C', '25'],
+        ['Thickness 2', 'Thickness of material 2', 'Number', 'nm', '500'],
+        ['Rate 2', 'Deposition rate (material 2)', 'Number', 'Å/s', '1.0'],
+        ['Tooling factor 2', 'Tooling factor (material 2)', 'Number', '', '1.0'],
+        ['Notes', 'Additional notes', 'Text', '', ''],
+    ]
+    row = write_table(guide_ws, row, 'Seq-Evaporation (Sequential Evaporation)', seq_evap)
+
     # Close Space Sublimation
     css = [
         ['Material name', 'Sublimed material', 'Text', '', 'CdTe'],
