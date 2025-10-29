@@ -13,18 +13,19 @@
 			{"process": "Experiment Info"}
 		]
 	},
-    "bypass_diodes": {
-      "name": "Bypass diodes",
-      "description": "Bypass process with UV-Ozone cleaning and perovskite layer",
-      "category": "Bypass Processes",
-      "researcher": "Anne",
+    "CSS1": {
+      "name": "Close Space Sublimation 1",
+      "description": "Close Space Sublimation standard process",
+      "category": "Close Space Sublimation",
+      "researcher": "Joshua",
       "process_sequence": [
         {"process": "Experiment Info"},
-        {"process": "Cleaning UV-Ozone", "config": {"solvents": 3}},
-        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
-        {"process": "Spin Coating", "config": {"solvents": 2, "solutes": 5, "spinsteps": 1, "antisolvent": true}},
-        {"process": "Evaporation"},
-        {"process": "Evaporation"},
+        {"process": "Cleaning UV-Ozone", "config": {"solvents": 2}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 2, "antisolvent": false}},
+        {"process": "Seq-Evaporation", "config": {"materials": 2}},
+        {"process": "Close Space Sublimation"},
+        {"process": "Annealing"},
+        {"process": "Seq-Evaporation", "config": {"materials": 2}},
         {"process": "Evaporation"}
       ]
     },
