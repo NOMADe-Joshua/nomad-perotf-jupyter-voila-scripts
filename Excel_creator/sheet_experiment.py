@@ -49,13 +49,13 @@ def add_experiment_sheet(workbook, process_sequence, is_testing=False):
 
         if process_name == 'Experiment Info':
             return [
-                make_label('Date', 'DATE'),
+                make_label('Date', 'YYYYMMDD'),
                 make_label('Project_Name', 'Raphael Pesch -> RaPe'),
-                make_label('Batch', ''),
-                make_label('Subbatch', ''),
-                make_label('Sample', ''),
+                make_label('Batch', '0'),
+                make_label('Subbatch', '0'),
+                make_label('Sample', '0'),
                 make_label('Nomad ID', ''),
-                make_label('Variation', ''),
+                make_label('Variation', 'readable variation'),
                 make_label('Sample dimension', '16x16'), 
                 make_label('Sample area [cm^2]', '0.105'),
                 make_label('Number of pixels', '4'),
