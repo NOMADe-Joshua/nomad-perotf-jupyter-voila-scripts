@@ -50,7 +50,7 @@ def add_experiment_sheet(workbook, process_sequence, is_testing=False):
         if process_name == 'Experiment Info':
             return [
                 make_label('Date', 'YYYYMMDD'),
-                make_label('Project_Name', 'Raphael Pesch -> RaPe'),
+                make_label('Project_Name', 'NaMe'),
                 make_label('Batch', '0'),
                 make_label('Subbatch', '0'),
                 make_label('Sample', '0'),
@@ -455,7 +455,7 @@ def add_experiment_sheet(workbook, process_sequence, is_testing=False):
 
     # Example: Apply a custom formula for the "Nomad ID" column (example only)
     for row in range(3, 4):
-        nomad_id_formula = f'=CONCATENATE("HZB_",B{row},"_",C{row},"_",D{row},"_C-",E{row})'
+        nomad_id_formula = f'=CONCATENATE("HZB_",B{row},"_",C{row},"_",D{row},"_",E{row})'
         ws[f'F{row}'].value = nomad_id_formula
 
     # Adjust column widths
