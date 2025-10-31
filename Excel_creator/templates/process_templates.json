@@ -105,6 +105,209 @@
         {"process": "Evaporation"},
         {"process": "Evaporation"}
       ]
+    },
+    "2TTandemCsClseed": {
+      "name": "2TTandem CsCl Seedlayer",
+      "description": "2T Tandem Hybrid with CsCl Seed Layer",
+      "category": "Hybrid Tandem",
+      "researcher": "Ronja Pappenberger",
+      "process_sequence": [
+        {"process": "Experiment Info"},
+        {"process": "Multijunction Info"},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "Sputtering"},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "Spin Coating", "config": {"solvents": 2, "solutes": 4, "spinsteps": 2, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 5, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "ALD"},
+        {"process": "Sputtering"},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"}
+      ]
+    },
+    "2TTandem": {
+      "name": "2TTandem Standard",
+      "description": "2T Tandem Hybrid",
+      "category": "Hybrid Tandem",
+      "researcher": "Ronja Pappenberger",
+      "process_sequence": [
+        {"process": "Experiment Info"},
+        {"process": "Multijunction Info"},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "Sputtering"},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 2, "solutes": 4, "spinsteps": 2, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 5, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"},
+        {"process": "ALD"},
+        {"process": "Sputtering"},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"}
+      ]
+    },
+    "Hybrid": {
+      "name": "Hybrid",
+      "description": "Hybrid Process",
+      "category": "Hybrid",
+      "researcher": "Ronja Pappenberger",
+      "process_sequence": [
+        {"process": "Experiment Info"},
+        {"process": "Cleaning O2-Plasma", "config": {"solvents": 3}},
+        {"process": "Sputtering"},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Co-Evaporation", "config": {"materials": 2}},
+        {"process": "Seq-Evaporation", "config": {"materials": 2}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 3, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"}
+      ]
+    },
+    "neuerprozess": {
+      "name": "Hybrid 2TTandem",
+      "description": "Hybrid Tandem Process",
+      "category": "Multijunction Tandem",
+      "researcher": "Ronja Pappenberger",
+      "process_sequence": [
+        {"process": "Experiment Info"},
+        {"process": "Multijunction Info"},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "Sputtering"},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Seq-Evaporation", "config": {"materials": 2}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 3, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"},
+        {"process": "ALD"},
+        {"process": "Sputtering"},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"}
+      ]
+    },
+    "HybridLiF": {
+      "name": "Hybrid LiF",
+      "description": "Hybrid Process with LiF treatment",
+      "category": "Hybrid",
+      "researcher": "Ronja Pappenberger",
+      "process_sequence": [
+        {"process": "Experiment Info"},
+        {"process": "Cleaning O2-Plasma", "config": {"solvents": 3}},
+        {"process": "Sputtering"},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Co-Evaporation", "config": {"materials": 2}},
+        {"process": "Seq-Evaporation", "config": {"materials": 2}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 3, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"}
+      ]
+    },
+    "HybridSemitransparent": {
+      "name": "Hybrid semitransparent",
+      "description": "Hybrid semitransparent process",
+      "category": "Hybrid",
+      "researcher": "Ronja Pappenberger",
+      "process_sequence": [
+        {"process": "Experiment Info"},
+        {"process": "Cleaning O2-Plasma", "config": {"solvents": 3}},
+        {"process": "Sputtering"},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Co-Evaporation", "config": {"materials": 2}},
+        {"process": "Seq-Evaporation", "config": {"materials": 2}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 3, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "ALD"},
+        {"process": "Sputtering"},
+        {"process": "Evaporation"}
+      ]
+    },
+    "SJ2StepCsXSeedlayer": {
+      "name": "SJ 2Step CsX Seedlayer",
+      "description": "Single Junction 2-Step process with CsX Seed Layer",
+      "category": "Single Junction",
+      "researcher": "Ronja Pappenberger",
+      "process_sequence": [
+        {"process": "Experiment Info"},
+        {"process": "Cleaning O2-Plasma", "config": {"solvents": 3}},
+        {"process": "Sputtering"},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "Spin Coating", "config": {"solvents": 2, "solutes": 4, "spinsteps": 2, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 5, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"}
+      ]
+    },
+    "SJ2StepCsXSeedlayerST": {
+      "name": "SJ 2Step CsX Seedlayer semitransparent",
+      "description": "Single Junction 2-Step process with CsX Seed Layer Semitransparent",
+      "category": "Single Junction",
+      "researcher": "Ronja Pappenberger",
+      "process_sequence": [
+        {"process": "Experiment Info"},
+        {"process": "Cleaning O2-Plasma", "config": {"solvents": 3}},
+        {"process": "Sputtering"},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "Spin Coating", "config": {"solvents": 2, "solutes": 4, "spinsteps": 2, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 5, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"},
+        {"process": "ALD"},
+        {"process": "Sputtering"},
+        {"process": "Evaporation"}
+      ]
+    },
+    "SJ2StepStandard": {
+      "name": "SJ 2Step Standard",
+      "description": "Single Junction 2-Step Standard process - 12 steps",
+      "category": "Single Junction",
+      "researcher": "Ronja Pappenberger",
+      "process_sequence": [
+        {"process": "Experiment Info"},
+        {"process": "Cleaning O2-Plasma", "config": {"solvents": 3}},
+        {"process": "Sputtering"},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 2, "solutes": 4, "spinsteps": 2, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 5, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"},
+        {"process": "Evaporation"}
+      ]
     }
   }
 }
