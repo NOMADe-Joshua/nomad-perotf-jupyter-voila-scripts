@@ -80,7 +80,7 @@
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
         {"process": "Seq-Evaporation", "config": {"materials": 2}},
         {"process": "Evaporation"}
-      ]
+      ] 
     },
     "PixdroTandem": {
       "name": "Pixdro Tandem",
@@ -92,7 +92,6 @@
         {"process": "Evaporation"},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
-        {"process": "Cleaning O2-Plasma", "config": {"solvents": 0}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
