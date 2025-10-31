@@ -68,7 +68,7 @@
     "PixdroSJ": {
       "name": "Pixdro SJ",
       "description": "Standard Pixdro Process",
-      "category": "Lamination",
+      "category": "Inkjet Printing",
       "researcher": "Theresa Küchle",
       "process_sequence": [
         {"process": "Experiment Info"},
@@ -82,63 +82,22 @@
         {"process": "Evaporation"}
       ]
     },
-    "NotionSJ": {
-      "name": "Notion SJ",
-      "description": "Standard Notion Process",
-      "category": "Lamination",
-      "researcher": "Theresa Küchle",
-      "process_sequence": [
-        {"process": "Experiment Info"},
-        {"process": "Cleaning UV-Ozone", "config": {"solvents": 3}},
-        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
-        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
-        {"process": "Seq-Evaporation", "config": {"materials": 2}},
-        {"process": "Inkjet Printing", "config": {"solvents": 2, "solutes": 3, "pixORnotion": "Notion", "Wf Number of Pulses": 1, "antisolvent": false}},
-        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
-        {"process": "Seq-Evaporation", "config": {"materials": 2}},
-        {"process": "Evaporation"}
-      ]
-    },
     "PixdroTandem": {
       "name": "Pixdro Tandem",
       "description": "Standard Pixdro Tandem Process",
-      "category": "Lamination",
+      "category": "Inkjet Printing",
       "researcher": "Theresa Küchle",
       "process_sequence": [
         {"process": "Experiment Info"},
         {"process": "Evaporation"},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
-        {"process": "Cleaning O2 plasma", "config": {"solvents": 0}},
+        {"process": "Cleaning O2-Plasma", "config": {"solvents": 0}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
         {"process": "Seq-Evaporation", "config": {"materials": 2}},
         {"process": "Inkjet Printing", "config": {"solvents": 2, "solutes": 3, "printer": "Pixdro", "Wf Number of Pulses": 1}},
-        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
-        {"process": "Evaporation"},
-        {"process": "ALD"},
-        {"process": "Sputter"},
-        {"process": "Evaporation"},
-        {"process": "Evaporation"}
-      ]
-    },
-    "NotionTJ": {
-      "name": "Notion Tandem",
-      "description": "Standard Notion Tandem Process",
-      "category": "Lamination",
-      "researcher": "Theresa Küchle",
-      "process_sequence": [
-        {"process": "Experiment Info"},
-        {"process": "Evaporation"},
-        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
-        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
-        {"process": "Cleaning O2 plasma", "config": {"solvents": 0}},
-        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
-        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
-        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
-        {"process": "Seq-Evaporation", "config": {"materials": 2}},
-        {"process": "Inkjet Printing", "config": {"solvents": 2, "solutes": 3, "printer": "Notion", "Wf Number of Pulses": 1}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
         {"process": "Evaporation"},
         {"process": "ALD"},
