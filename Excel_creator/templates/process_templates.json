@@ -76,7 +76,7 @@
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
         {"process": "Seq-Evaporation", "config": {"materials": 2}},
-        {"process": "Inkjet Printing", "config": {"solvents": 2, "solutes": 3, "pixORnotion": "Pixdro", "Wf Number of Pulses": 1, "antisolvent": false}},
+        {"process": "Inkjet Printing", "config": {"solvents": 2, "solutes": 3, "pixORnotion": "Pixdro", "Wf Number of Pulses": 1}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
         {"process": "Seq-Evaporation", "config": {"materials": 2}},
         {"process": "Evaporation"}
@@ -97,7 +97,7 @@
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
         {"process": "Seq-Evaporation", "config": {"materials": 2}},
-        {"process": "Inkjet Printing", "config": {"solvents": 2, "solutes": 3, "printer": "Pixdro", "Wf Number of Pulses": 1}},
+        {"process": "Inkjet Printing", "config": {"solvents": 2, "solutes": 3, "pixORnotion": "Pixdro", "Wf Number of Pulses": 1}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
         {"process": "Evaporation"},
         {"process": "ALD"},
