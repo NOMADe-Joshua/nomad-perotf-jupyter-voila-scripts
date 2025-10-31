@@ -101,7 +101,7 @@
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 2, "spinsteps": 1, "antisolvent": false}},
         {"process": "Evaporation"},
         {"process": "ALD"},
-        {"process": "Sputter"},
+        {"process": "Sputtering"},
         {"process": "Evaporation"},
         {"process": "Evaporation"}
       ]
