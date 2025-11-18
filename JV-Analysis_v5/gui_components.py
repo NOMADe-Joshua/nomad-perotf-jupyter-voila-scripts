@@ -895,7 +895,7 @@ class PlotUI:
         
         # Checkbox for separating scan directions in boxplots
         self.separate_scan_dir_checkbox = widgets.Checkbox(
-            value=False,
+            value=True,  # CHANGED: Default is now True
             description='Separate Forward/Reverse in Boxplots',
             style={'description_width': 'initial'},
             layout=widgets.Layout(margin='10px 0')
