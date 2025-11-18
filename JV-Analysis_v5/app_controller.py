@@ -273,18 +273,49 @@ class JVAnalysisApp:
         success = self.data_manager.load_batch_data(batch_ids, self.load_status_output)
         
         if success:
-            # Set data for sample selection in filter UI
             data = self.data_manager.get_data()
+            
+            # CRITICAL: Show cycle information in LOAD STATUS OUTPUT
+            with self.load_status_output:
+                print(f"\n{'='*60}")
+                print(f"📊 CYCLE DETECTION RESULTS:")
+                print(f"{'='*60}")
+                
+                if self.data_manager.has_cycle_data:
+                    print(f"✅ Cycle data FOUND!")
+                    print(f"   • Sample-pixel combinations with cycles: {len(self.data_manager.cycle_info)}")
+                    
+                    # Show statistics
+                    if 'cycle_number' in data['jvc'].columns:
+                        cycle_df = data['jvc'][data['jvc']['cycle_number'].notna()]
+                        if not cycle_df.empty:
+                            num_cycles = cycle_df['cycle_number'].nunique()
+                            total_with_cycles = len(cycle_df)
+                            print(f"   • Total measurements with cycle info: {total_with_cycles}")
+                            print(f"   • Unique cycle numbers found: {sorted(cycle_df['cycle_number'].unique().tolist())}")
+                            
+                            # Show examples
+                            print(f"\n   Example measurements:")
+                            for _, row in cycle_df.head(3).iterrows():
+                                print(f"      - {row['sample']} / {row['px_number']} / Cycle {int(row['cycle_number'])} / PCE: {row['PCE(%)']:.2f}%")
+                else:
+                    print(f"ℹ️  NO cycle data detected in this dataset")
+                    print(f"   • This is normal for datasets without cycle measurements")
+                    print(f"   • Cycle filter will be hidden in Filter tab")
+                
+                print(f"{'='*60}\n")
+            
+            # Set data for FilterUI
             self.filter_ui.set_sample_data(data)
             
-            # Show initial data summary
+            # Show general data summary
             with self.load_status_output:
-                print(f"\nData Loading Summary:")
+                print(f"\n📈 Data Loading Summary:")
                 print(f"   Total records loaded: {len(data['jvc'])}")
                 print(f"   Unique samples: {data['jvc']['sample'].nunique()}")
                 print(f"   Unique cells: {data['jvc'].groupby('sample')['cell'].nunique().sum()}")
                 print(f"   Batches: {data['jvc']['batch'].nunique()}")
-                print(f"\nData ready for variable assignment and filtering!")
+                print(f"\n✅ Data ready for variable assignment and filtering!")
             
             self._enable_tab(1)
             self.tabs.selected_index = 1
@@ -496,73 +527,106 @@ If you tested specific variables or conditions for each sample, please write the
             ErrorHandler.log_error("displaying measurements", e, self.show_other_measurements)
     
     def _on_apply_filters(self, b):
-        """Handle filter application using sample-based filtering"""
+        """Handle filter application using sample-based filtering with cycle support"""
         data = self.data_manager.get_data()
         if not data or "jvc" not in data:
             with self.filter_ui.main_output:
                 print("No data loaded. Please load data first.")
             return
 
-        # Get selected samples and filter values
+        # Get filter values
         selected_items = self.filter_ui.get_selected_items()
         filter_values = self.filter_ui.get_filter_values()
         direction_value = self.filter_ui.get_direction_value()
+        cycle_settings = self.filter_ui.get_cycle_filter_settings()  # CHANGED
     
         with self.filter_ui.main_output:
             clear_output(wait=True)
+            
+            print(f"{'='*70}")
+            print(f"🔧 FILTER APPLICATION")
+            print(f"{'='*70}")
+            print(f"Direction filter: {direction_value}")
+            print(f"Cycle filter mode: {cycle_settings.get('mode', 'disabled')}")  # CHANGED
+            if cycle_settings.get('mode') == 'specific':
+                print(f"   Selected cycles: {cycle_settings.get('cycles', [])}")
+            print(f"Sample selection active: {selected_items is not None}")
+            print(f"Numeric filters: {len(filter_values)}")
+            print(f"{'='*70}\n")
+            
             try:
-                # Apply the filters
+                working_data = data["jvc"].copy()
+                original_count = len(working_data)
+                
+                # STEP 1: Apply cycle filter based on mode
+                if cycle_settings['mode'] == 'best_only' and self.data_manager.has_cycle_data:
+                    print(f"🔄 Step 1: Applying best-cycle-per-pixel filter...")
+                    working_data = self.data_manager.apply_best_cycle_filter(
+                        working_data, 
+                        verbose=True
+                    )
+                    after_cycle_count = len(working_data)
+                    print(f"   Result: {original_count} → {after_cycle_count} records")
+                    print()
+                    
+                elif cycle_settings['mode'] == 'specific' and self.data_manager.has_cycle_data:
+                    print(f"🔄 Step 1: Filtering for specific cycles: {cycle_settings['cycles']}...")
+                    working_data = self.data_manager.apply_specific_cycle_filter(
+                        working_data,
+                        cycle_settings['cycles'],
+                        verbose=True
+                    )
+                    after_cycle_count = len(working_data)
+                    print(f"   Result: {original_count} → {after_cycle_count} records")
+                    print()
+                    
+                else:
+                    if cycle_settings['mode'] != 'disabled' and cycle_settings['mode'] != 'all':
+                        print(f"ℹ️  Cycle filter set but no cycle data available - skipping")
+                        print()
+                    after_cycle_count = original_count
+                
+                # STEP 2: Apply standard filters
+                print(f"🔍 Step 2: Applying standard filters...")
+                
+                # Temporarily replace data
+                original_jvc = data["jvc"]
+                data["jvc"] = working_data
+                
                 filtered_df, omitted_df, filter_params = self.data_manager.apply_filters(
                     filter_values, direction_value, selected_items, verbose=True
                 )
                 
-                # Show results with detailed breakdown
-                original_count = len(data["jvc"])
+                # Restore
+                data["jvc"] = original_jvc
+                
+                # STEP 3: Show summary
                 final_count = len(filtered_df)
-                total_excluded = original_count - final_count
                 
-                # Calculate the breakdown of exclusions
-                if selected_items is None:
-                    # No sample selection applied - all samples used
-                    sample_selection_excluded = 0
-                    filter_condition_excluded = total_excluded
-                else:
-                    # Sample selection was applied
-                    sample_selection_excluded = len(omitted_df[omitted_df['filter_reason'].str.contains('sample/cell not selected', na=False)])
-                    filter_condition_excluded = len(omitted_df[~omitted_df['filter_reason'].str.contains('sample/cell not selected', na=False)])
+                print(f"\n{'='*70}")
+                print(f"📊 FILTERING SUMMARY:")
+                print(f"{'='*70}")
+                print(f"Original dataset:        {original_count:>6} records")
                 
-                print(f"\nFiltering Results:")
-                print(f"   Original dataset: {original_count} records")
-                print(f"   Excluded by sample selection: {sample_selection_excluded} records")
-                print(f"   Excluded by filter conditions: {filter_condition_excluded} records")
-                print(f"   Final dataset: {final_count} records")
-                print(f"   Retention rate: {(final_count/original_count)*100:.1f}%")
+                if cycle_settings['mode'] in ['best_only', 'specific'] and self.data_manager.has_cycle_data:
+                    cycle_removed = original_count - after_cycle_count
+                    print(f"After cycle filter:      {after_cycle_count:>6} records ({cycle_removed} removed)")
                 
-                # Show which selected samples were removed by filter conditions (not by selection)
-                if len(omitted_df) > 0:
-                    # Only show samples that were removed by JV parameter filters, not by sample selection
-                    jv_filtered_samples = omitted_df[~omitted_df['filter_reason'].str.contains('sample/cell not selected', na=False)]
-                    
-                    if len(jv_filtered_samples) > 0:
-                        print(f"\n📋 Selected samples removed by filter conditions:")
-                        
-                        # Group by sample and show reasons
-                        sample_filter_reasons = jv_filtered_samples.groupby(['sample', 'cell'])['filter_reason'].first()
-                        
-                        for (sample, cell), reason in sample_filter_reasons.items():
-                            # Clean up the reason string - remove trailing comma and space
-                            clean_reason = reason.rstrip(', ')
-                            print(f"   • {sample}_{cell}: {clean_reason}")
+                print(f"After all filters:       {final_count:>6} records")
+                print(f"Retention rate:          {(final_count/original_count)*100:>5.1f}%")
+                print(f"{'='*70}")
                 
                 if final_count > 0:
                     print(f"\n✅ Filtering complete! Proceed to plotting tab.")
                     self._enable_tab(3)
                 else:
-                    print(f"\n⚠️ No data available for plotting. Please adjust filters.")
+                    print(f"\n⚠️  No data remains after filtering. Please adjust filters.")
                 
             except Exception as e:
-                ErrorHandler.log_error("applying filters", e, self.filter_ui.main_output)
-    
+                print(f"\n❌ Error during filtering:")
+                import traceback
+                traceback.print_exc()
+
     def _on_create_plots(self, b):
         """Handle plot creation"""
         data = self.data_manager.get_data()

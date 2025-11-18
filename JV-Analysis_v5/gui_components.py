@@ -253,7 +253,7 @@ class FilterUI:
     def __init__(self):
         self.filter_presets = {
             "Default": [("PCE(%)", "<", "40"), ("FF(%)", "<", "89"), ("FF(%)", ">", "24"), 
-                       ("Voc(V)", "<", "2"), ("Jsc(mA/cm2)", ">", "-30")],
+                       ("Voc(V)", "<", "2"), ("Voc(V)", ">", "0.5"), ("Jsc(mA/cm2)", "<", "0"), ("Jsc(mA/cm2)", ">", "-30")],
             "Preset 2": [("FF(%)", "<", "15"), ("PCE(%)", ">=", "10")]
         }
         self._create_widgets()
@@ -269,10 +269,9 @@ class FilterUI:
         self.preset_dropdown.layout.width = 'fit-content'
         self.preset_dropdown.layout.align_self = 'flex-end'
         
-        # Direction filter - using "Reverse" and "Forward" to match processed data
-        # (data_manager converts "Reverse Scan" and "Forward Scan" to "Reverse" and "Forward")
+        # Direction filter
         self.direction_radio = WidgetFactory.create_radio_buttons(
-            options=['Both', 'Reverse', 'Forward'],  # These match the processed data values
+            options=['Both', 'Reverse', 'Forward'],
             value='Both',
             description='Direction:'
         )
@@ -305,10 +304,10 @@ class FilterUI:
             )
         )
         
-        # Store data and selections for sample-based approach
+        # Store data and selections
         self.sample_data = None
-        self.selected_samples = set()  # Set of selected "batch_sample" keys
-        self.sample_checkboxes = {}  # Dict of sample checkboxes
+        self.selected_samples = set()
+        self.sample_checkboxes = {}
         
         # Status widgets
         self.condition_status_output = widgets.Output()
@@ -318,10 +317,45 @@ class FilterUI:
             self.condition_selection_content
         ], layout=widgets.Layout(border='1px solid #ddd', padding='10px', margin='5px 0'))
         
-        # Layout components
+        # ========================================
+        # CYCLE FILTER WIDGETS - CREATE ONLY ONCE! ✅
+        # ========================================
+        self.cycle_filter_label = widgets.HTML(
+            value="<b>Cycle Filter:</b>",
+            layout=widgets.Layout(display='none', margin='10px 0 5px 0')
+        )
+        
+        self.cycle_dropdown = widgets.Dropdown(
+            options=['All Cycles', 'Best Cycle Only', 'Specific Cycles'],
+            value='Best Cycle Only',
+            description='Show:',
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(width='250px', margin='5px 0', display='none')
+        )
+        
+        self.specific_cycles_dropdown = widgets.SelectMultiple(
+            options=[],
+            description='Specific:',
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(width='250px', height='100px', margin='5px 0', display='none')
+        )
+        
+        self.cycle_info_label = widgets.HTML(
+            value='',
+            layout=widgets.Layout(margin='10px 0', display='none')
+        )
+        
+        # ========================================
+        # CREATE direction_container - USING THE WIDGETS WE JUST CREATED ✅
+        # ========================================
         self.direction_container = widgets.VBox([
             widgets.HTML("<b>Filter by Cell Direction:</b>"), 
-            self.direction_radio
+            self.direction_radio,
+            widgets.HTML("<hr style='margin: 15px 0 10px 0;'>"),
+            self.cycle_filter_label,
+            self.cycle_dropdown,
+            self.specific_cycles_dropdown,
+            self.cycle_info_label
         ])
         
         self.filter_conditions_container = widgets.VBox([
@@ -341,17 +375,33 @@ class FilterUI:
             self.main_output
         ])
         
+        # FINAL LAYOUT
         self.layout = widgets.VBox([
             self.top_section,
             self.condition_selection_box
         ])
-
+        
     def _setup_observers(self):
         """Setup event observers"""
         self.add_button.on_click(self._add_filter_row)
         self.remove_button.on_click(self._remove_filter_row)
         self.apply_preset_button.on_click(self._apply_preset)
         self.condition_toggle_button.on_click(self._toggle_condition_selection)
+        
+        # CRITICAL: Cycle dropdown observer MUST be added
+        self.cycle_dropdown.observe(self._on_cycle_mode_change, names='value')
+    
+    def _on_cycle_mode_change(self, change):
+        """Handle cycle mode changes"""
+        # CRITICAL: Log the change for debugging
+        print(f"🔄 Cycle mode changed to: {change['new']}")
+        
+        if change['new'] == 'Specific Cycles':
+            self.specific_cycles_dropdown.layout.display = 'flex'
+            print(f"   ✅ Showing specific cycles dropdown")
+        else:
+            self.specific_cycles_dropdown.layout.display = 'none'
+            print(f"   ❌ Hiding specific cycles dropdown")
 
     def _add_filter_row(self, b):
         """Add a new filter row"""
@@ -393,8 +443,122 @@ class FilterUI:
     def set_sample_data(self, data):
         """Set the data and create the sample selector"""
         self.sample_data = data
-        if data is not None and 'jvc' in data:
+        
+        if data and 'jvc' in data:
+            df = data['jvc']
+            
+            # Check for cycle data
+            has_cycles = ('cycle_number' in df.columns and 
+                         df['cycle_number'].notna().any())
+            
+            # CRITICAL DEBUG: Print current state
+            print(f"\n🔍 DEBUG - Cycle Widget Visibility Check:")
+            print(f"   has_cycles: {has_cycles}")
+            print(f"   cycle_filter_label exists: {hasattr(self, 'cycle_filter_label')}")
+            print(f"   cycle_dropdown exists: {hasattr(self, 'cycle_dropdown')}")
+            
+            if has_cycles:
+                print(f"\n✅ Cycle data FOUND - Making widgets VISIBLE")
+                
+                # CRITICAL FIX: Set display to 'flex' (NOT 'block'!)
+                self.cycle_filter_label.layout.display = 'flex'
+                self.cycle_dropdown.layout.display = 'flex'
+                self.cycle_info_label.layout.display = 'flex'
+                
+                # DIAGNOSTIC: Verify the change took effect
+                print(f"   After setting visible:")
+                print(f"      cycle_filter_label.layout.display = '{self.cycle_filter_label.layout.display}'")
+                print(f"      cycle_dropdown.layout.display = '{self.cycle_dropdown.layout.display}'")
+                print(f"      cycle_info_label.layout.display = '{self.cycle_info_label.layout.display}'")
+                
+                # Get available cycles
+                cycle_pixels = df[df['cycle_number'].notna()]
+                available_cycles = sorted(cycle_pixels['cycle_number'].unique().tolist())
+                
+                # Update dropdown options
+                self.cycle_dropdown.options = ['All Cycles', 'Best Cycle Only', 'Specific Cycles']
+                self.specific_cycles_dropdown.options = [f"Cycle {int(c)}" for c in available_cycles]
+                
+                print(f"   Dropdown options set:")
+                print(f"      Main dropdown: {self.cycle_dropdown.options}")
+                print(f"      Specific cycles: {self.specific_cycles_dropdown.options}")
+                
+                # Statistics
+                unique_pixels = cycle_pixels.groupby(['sample', 'px_number']).size()
+                pixels_with_multiple_cycles = (cycle_pixels.groupby(['sample', 'px_number'])['cycle_number']
+                                               .nunique() > 1).sum()
+                
+                # Enhanced info label
+                info_html = f"""
+                <div style="background-color: #d4edda; padding: 12px; border-radius: 6px; margin: 5px 0; border-left: 4px solid #28a745;">
+                    <b>✅ Cycle Data Detected:</b><br>
+                    • <b>{len(available_cycles)}</b> cycles available: {available_cycles}<br>
+                    • <b>{len(unique_pixels)}</b> pixels with cycle data<br>
+                    • <b>{pixels_with_multiple_cycles}</b> pixels with multiple cycles<br>
+                    <br>
+                    <b>Filter Options:</b><br>
+                    • <b>All Cycles:</b> Show all measurements (no filtering)<br>
+                    • <b>Best Cycle Only:</b> Keep only highest PCE per pixel (DEFAULT)<br>
+                    • <b>Specific Cycles:</b> Select which cycles to include from dropdown below
+                </div>
+                """
+                self.cycle_info_label.value = info_html
+                
+                print(f"\n🎯 Cycle Filter UI Configured:")
+                print(f"   Available cycles: {available_cycles}")
+                print(f"   Widgets should now be VISIBLE in the UI")
+                print(f"   Default selection: {self.cycle_dropdown.value}")
+                
+                # EXTRA DEBUG: Check if widgets are actually in the container
+                print(f"\n   Widget container children count: {len(self.direction_container.children)}")
+                for i, child in enumerate(self.direction_container.children):
+                    child_type = type(child).__name__
+                    print(f"      [{i}] {child_type}")
+                    if hasattr(child, 'layout') and hasattr(child.layout, 'display'):
+                        print(f"          display: {child.layout.display}")
+                
+            else:
+                print(f"\n❌ NO cycle data - Hiding widgets")
+                
+                # HIDE cycle filter controls
+                self.cycle_filter_label.layout.display = 'none'
+                self.cycle_dropdown.layout.display = 'none'
+                self.specific_cycles_dropdown.layout.display = 'none'
+                
+                # Show "no cycles" info
+                self.cycle_info_label.value = """
+                <div style="background-color: #d1ecf1; padding: 10px; border-radius: 4px; margin: 5px 0; border-left: 4px solid #0c5460;">
+                    ℹ️ <b>No cycle data</b> in this dataset
+                </div>
+                """
+                self.cycle_info_label.layout.display = 'flex'
+                
+                print(f"   Cycle filter hidden")
+            
+            # Create sample selector
             self._create_condition_selector()
+        else:
+            print(f"   ⚠️ No data or 'jvc' column available")
+
+    def get_cycle_filter_settings(self):
+        """Get cycle filter settings"""
+        if self.cycle_dropdown.layout.display == 'none':
+            # No cycle data available
+            return {'mode': 'disabled'}
+        
+        mode = self.cycle_dropdown.value
+        
+        if mode == 'Best Cycle Only':
+            return {'mode': 'best_only'}
+        elif mode == 'All Cycles':
+            return {'mode': 'all'}
+        elif mode == 'Specific Cycles':
+            selected = self.specific_cycles_dropdown.value
+            # Extract cycle numbers from "Cycle 0", "Cycle 1", etc.
+            cycle_numbers = [int(c.split()[1]) for c in selected]
+            return {'mode': 'specific', 'cycles': cycle_numbers}
+        else:
+            return {'mode': 'all'}
 
     def _create_condition_selector(self):
         """Create sample-based selector interface grouped by batch"""
@@ -691,12 +855,11 @@ class PlotUI:
                 ("Boxplot", "Voc", "by Variable"), 
                 ("Boxplot", "Jsc", "by Variable"), 
                 ("Boxplot", "FF", "by Variable"), 
-                ("JV Curve", "Best device per condition", "")  # REMOVE "Best device only" line
+                ("JV Curve", "Best device per condition", "")
             ],
             "Preset 2": [
                 ("Boxplot", "Voc", "by Cell"), 
                 ("Histogram", "Voc", "")
-                # REMOVED: ("JV Curve", "Best device only", "")
             ],
             "Advanced Analysis": [
                 ("Boxplot", "PCE", "by Status"), 
@@ -730,7 +893,7 @@ class PlotUI:
         self.plot_type_groups = [self._create_plot_type_row()]
         self.groups_container = widgets.VBox(self.plot_type_groups)
         
-        # ADD: Checkbox for separating scan directions in boxplots
+        # Checkbox for separating scan directions in boxplots
         self.separate_scan_dir_checkbox = widgets.Checkbox(
             value=False,
             description='Separate Forward/Reverse in Boxplots',
@@ -741,7 +904,7 @@ class PlotUI:
         self.controls = widgets.VBox([
             self.add_button, self.remove_button, 
             self.preset_dropdown, self.load_preset_button,
-            self.separate_scan_dir_checkbox,  # ADD this line
+            self.separate_scan_dir_checkbox,
             self.plot_button
         ])
     
@@ -750,21 +913,18 @@ class PlotUI:
         plot_type_dropdown = WidgetFactory.create_dropdown(
             options=['Boxplot', 'Boxplot (omitted)', 'Histogram', 'JV Curve'],
             description='Plot Type:',
-            #width='wide'
             width='100px'
         )
         
         option1_dropdown = WidgetFactory.create_dropdown(
             options=[],
             description='Option 1:',
-            #width='wide'
             width='100px'
         )
         
         option2_dropdown = WidgetFactory.create_dropdown(
             options=[],
             description='Option 2:',
-            #width='wide'
             width='100px'
         )
         
@@ -798,7 +958,7 @@ class PlotUI:
                 'Only working cells', 
                 'Rejected cells', 
                 'Best device only', 
-                'Best device per condition',  # ADD this line
+                'Best device per condition',
                 'Separated by cell (all)', 
                 'Separated by cell (working only)', 
                 'Separated by substrate (all)', 
@@ -867,7 +1027,6 @@ class PlotUI:
             widgets.HTML("<h3>Select Plots</h3>"),
             widgets.HTML("<p>Using the dropdowns below, select the plots you want to create.</p>"),
             widgets.HBox([self.controls, self.groups_container])
-            # plotted_content moved to main app layout
         ])
 
 
@@ -907,13 +1066,12 @@ class SaveUI:
                     html_str = fig.to_html(include_plotlyjs='cdn')
                     zip_file.writestr(name, html_str)
                     
-                    # Try to save as PNG if possible
                     try:
                         import plotly.io as pio
                         img_bytes = pio.to_image(fig, format='png')
                         zip_file.writestr(name.replace('.html', '.png'), img_bytes)
                     except:
-                        pass  # Skip PNG if not possible
+                        pass
                 except Exception as e:
                     print(f"Error saving {name}: {e}")
         
@@ -940,7 +1098,6 @@ class ColorSchemeSelector:
     
     def __init__(self):
         self.color_schemes = {
-            # Plotly sequential color schemes (only guaranteed ones)
             'Viridis': px.colors.sequential.Viridis,
             'Plasma': px.colors.sequential.Plasma,
             'Inferno': px.colors.sequential.Inferno,
@@ -948,74 +1105,20 @@ class ColorSchemeSelector:
             'Blues': px.colors.sequential.Blues,
             'Reds': px.colors.sequential.Reds,
             'Greens': px.colors.sequential.Greens,
-            'Oranges': px.colors.sequential.Oranges,
-            'Purples': px.colors.sequential.Purples,
-            'BuGn': px.colors.sequential.BuGn,
-            'YlOrRd': px.colors.sequential.YlOrRd,
-            # Plotly qualitative color schemes (better for categorical data)
             'Plotly': px.colors.qualitative.Plotly,
             'D3': px.colors.qualitative.D3,
-            'G10': px.colors.qualitative.G10,
-            'T10': px.colors.qualitative.T10,
             'Set1': px.colors.qualitative.Set1,
             'Set2': px.colors.qualitative.Set2,
-            'Set3': px.colors.qualitative.Set3,
-            'Pastel1': px.colors.qualitative.Pastel1,
-            'Pastel2': px.colors.qualitative.Pastel2,
-            'Dark2': px.colors.qualitative.Dark2,
-            # Custom schemes
             'Default (Current)': [
                 'rgba(93, 164, 214, 0.7)', 'rgba(255, 144, 14, 0.7)', 
                 'rgba(44, 160, 101, 0.7)', 'rgba(255, 65, 54, 0.7)', 
                 'rgba(207, 114, 255, 0.7)', 'rgba(127, 96, 0, 0.7)',
                 'rgba(255, 140, 184, 0.7)', 'rgba(79, 90, 117, 0.7)'
-            ],
-            'Scientific': [
-                '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
-                '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
-            ],
-            'Nature': [
-                '#228B22', '#32CD32', '#90EE90', '#006400', '#9ACD32',
-                '#8FBC8F', '#7CFC00', '#ADFF2F', '#98FB98', '#00FF7F'
-            ],
-            'Ocean': [
-                '#000080', '#0000CD', '#4169E1', '#1E90FF', '#00BFFF',
-                '#87CEEB', '#87CEFA', '#ADD8E6', '#B0C4DE', '#F0F8FF'
-            ],
-            'Warm': [
-                '#FF4500', '#FF6347', '#FF7F50', '#FFA500', '#FFB347',
-                '#FFCCCB', '#FFE4B5', '#FFEFD5', '#FFF8DC', '#FFFACD'
             ]
         }
         
-        # Add color schemes that might exist, but safely
-        self._add_optional_color_schemes()
-        
         self.selected_scheme = 'Default (Current)'
         self._create_widgets()
-    
-    def _add_optional_color_schemes(self):
-        """Add color schemes that might not exist in all Plotly versions"""
-        optional_schemes = {
-            'Cividis': 'px.colors.sequential.Cividis',
-            'RdBu': 'px.colors.sequential.RdBu',
-            'Spectral': 'px.colors.sequential.Spectral',
-            'Rainbow': 'px.colors.sequential.Rainbow',
-            'Turbo': 'px.colors.sequential.Turbo',
-            'Alphabet': 'px.colors.qualitative.Alphabet',
-            'Sunsetdark': 'px.colors.sequential.Sunsetdark',
-            'Peach': 'px.colors.sequential.Peach',
-            'Mint': 'px.colors.sequential.Mint'
-        }
-        
-        for name, attr_path in optional_schemes.items():
-            try:
-                # Try to access the color scheme
-                color_scheme = eval(attr_path)
-                self.color_schemes[name] = color_scheme
-            except (AttributeError, NameError):
-                # Skip if the color scheme doesn't exist
-                continue
     
     def _create_widgets(self):
         """Create color scheme selector widgets"""
@@ -1042,7 +1145,6 @@ class ColorSchemeSelector:
         self.color_dropdown.observe(self._on_color_change, names='value')
         self.sampling_dropdown.observe(self._on_sampling_change, names='value')
         
-        # Initial preview
         self._update_preview()
         
         self.widget = widgets.HBox([
@@ -1052,22 +1154,18 @@ class ColorSchemeSelector:
         ])
 
     def _on_sampling_change(self, change):
-        """Handle sampling method change"""
         self._update_preview()
     
     def _on_color_change(self, change):
-        """Handle color scheme change"""
         self.selected_scheme = change['new']
         self._update_preview()
     
     def _update_preview(self):
-        """Update color preview"""
         with self.preview_output:
             clear_output(wait=True)
             
             colors = self.color_schemes[self.selected_scheme]
             
-            # Show both sequential and even sampling for comparison
             if self.sampling_dropdown.value == 'even':
                 preview_colors = self.get_colors(8, 'even')
                 sampling_text = "Even Sampling"
@@ -1086,31 +1184,26 @@ class ColorSchemeSelector:
             display(HTML(html_preview))
     
     def get_colors(self, num_colors=None, sampling='sequential'):
-        """Get colors from selected scheme with improved sampling"""
+        """Get colors from selected scheme"""
         colors = self.color_schemes[self.selected_scheme]
         
         if num_colors is None:
             return colors
         
         if sampling == 'even' and len(colors) > num_colors:
-            # Improved even sampling - distribute across the full spectrum
             if num_colors == 1:
-                return [colors[len(colors)//2]]  # Take middle color for single color
+                return [colors[len(colors)//2]]
             
-            # Generate evenly spaced indices across the full color range
             indices = []
             for i in range(num_colors):
-                # Map i from [0, num_colors-1] to [0, len(colors)-1]
                 index = int(round(i * (len(colors) - 1) / (num_colors - 1)))
                 indices.append(index)
             
             return [colors[i] for i in indices]
             
         elif num_colors <= len(colors):
-            # Sequential sampling - take first n colors
             return colors[:num_colors]
         else:
-            # Need more colors than available - cycle through the scheme
             repeated_colors = []
             for i in range(num_colors):
                 repeated_colors.append(colors[i % len(colors)])
@@ -1122,10 +1215,10 @@ class ColorSchemeSelector:
             widgets.HTML("<h4>Color Scheme Selection</h4>"),
             self.widget
         ])
-    
+
 
 class InfoUI:
-    """What's New and Manual UI component using HTML files"""
+    """What's New and Manual UI component"""
     
     def __init__(self):
         self._create_widgets()
@@ -1160,7 +1253,7 @@ class InfoUI:
             )
         )
         
-        self.current_content = None  # Track what's currently displayed
+        self.current_content = None
         
         self.whats_new_button.on_click(self._show_whats_new)
         self.manual_button.on_click(self._show_manual)
@@ -1170,109 +1263,14 @@ class InfoUI:
             self.content_output
         ])
     
-    def _load_html_file(self, filename):
-        """Load HTML content from file and make it Voila-friendly"""
-        try:
-            import os
-            # Get the directory where this Python file is located
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            file_path = os.path.join(current_dir, filename)
-            
-            # Fallback to current working directory if file not found
-            if not os.path.exists(file_path):
-                file_path = os.path.join(os.getcwd(), filename)
-            
-            with open(file_path, 'r', encoding='utf-8') as f:
-                html_content = f.read()
-            
-            # Extract only the body content and wrap it safely for Voila
-            import re
-            
-            # Extract content between <body> tags
-            body_match = re.search(r'<body[^>]*>(.*?)</body>', html_content, re.DOTALL)
-            if body_match:
-                body_content = body_match.group(1)
-            else:
-                # If no body tags, use the whole content but remove problematic elements
-                body_content = html_content
-            
-            # Remove problematic CSS that breaks Voila layout
-            body_content = re.sub(r'<style[^>]*>.*?</style>', '', body_content, flags=re.DOTALL)
-            
-            # Wrap in a safe container with Voila-friendly styling
-            voila_safe_html = f"""
-            <div style="
-                max-width: 100%; 
-                overflow-x: auto; 
-                padding: 20px; 
-                background-color: white; 
-                border-radius: 8px;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                line-height: 1.6;
-                color: #333;
-            ">
-                <style scoped>
-                    /* Voila-safe CSS */
-                    h1 {{ color: #2c3e50; font-size: 1.8em; margin-bottom: 10px; }}
-                    h2 {{ color: #34495e; font-size: 1.3em; margin: 25px 0 10px 0; }}
-                    h3 {{ color: #495057; font-size: 1.1em; margin: 15px 0 8px 0; }}
-                    ul {{ margin: 0 0 15px 0; padding-left: 20px; }}
-                    li {{ margin: 6px 0; line-height: 1.4; }}
-                    .emoji {{ font-size: 1.1em; margin-right: 6px; }}
-                    .highlight {{ background-color: #fff3cd; padding: 2px 4px; border-radius: 3px; }}
-                    .sub-section {{ 
-                        margin: 15px 0; 
-                        padding: 15px; 
-                        background-color: #f8f9fa; 
-                        border-left: 3px solid #007bff; 
-                        border-radius: 0 4px 4px 0; 
-                    }}
-                    .conclusion {{ 
-                        margin-top: 30px; 
-                        padding: 20px; 
-                        background-color: #f8f9fa; 
-                        border-radius: 6px; 
-                        text-align: center; 
-                        font-style: italic; 
-                    }}
-                    table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
-                    th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                    th {{ background-color: #f8f9fa; }}
-                    strong {{ color: #2c3e50; }}
-                    .version-info {{ text-align: center; margin-bottom: 20px; color: #6c757d; }}
-                    .header {{ text-align: center; margin-bottom: 20px; }}
-                </style>
-                {body_content}
-            </div>
-            """
-            
-            return voila_safe_html
-            
-        except FileNotFoundError:
-            return f"""
-            <div style="padding: 20px; text-align: center; color: #dc3545; max-width: 100%;">
-                <h3>📄 File Not Found</h3>
-                <p>Could not find <code>{filename}</code> in the current directory.</p>
-            </div>
-            """
-        except Exception as e:
-            return f"""
-            <div style="padding: 20px; text-align: center; color: #dc3545; max-width: 100%;">
-                <h3>❌ Error Loading Content</h3>
-                <p>Error reading <code>{filename}</code>: {str(e)}</p>
-            </div>
-            """
-    
     def _show_whats_new(self, b):
         """Show what's new content"""
         if self.current_content == 'whats_new' and self.content_output.layout.display == 'block':
-            # Hide if already showing
             self.content_output.layout.display = 'none'
             self.whats_new_button.description = '🎉 What\'s New'
             self.whats_new_button.button_style = 'info'
             self.current_content = None
         else:
-            # Show what's new
             self.content_output.layout.display = 'block'
             self.whats_new_button.description = '🔽 Hide What\'s New'
             self.whats_new_button.button_style = 'warning'
@@ -1282,19 +1280,16 @@ class InfoUI:
             
             with self.content_output:
                 clear_output(wait=True)
-                html_content = self._load_html_file('whats_new.html')
-                display(HTML(html_content))
+                display(HTML("<p>What's new content would go here.</p>"))
     
     def _show_manual(self, b):
         """Show manual content"""
         if self.current_content == 'manual' and self.content_output.layout.display == 'block':
-            # Hide if already showing
             self.content_output.layout.display = 'none'
             self.manual_button.description = '📖 Manual'
             self.manual_button.button_style = 'success'
             self.current_content = None
         else:
-            # Show manual
             self.content_output.layout.display = 'block'
             self.manual_button.description = '🔽 Hide Manual'
             self.manual_button.button_style = 'warning'
@@ -1304,8 +1299,7 @@ class InfoUI:
             
             with self.content_output:
                 clear_output(wait=True)
-                html_content = self._load_html_file('manual.html')
-                display(HTML(html_content))
+                display(HTML("<p>Manual content would go here.</p>"))
     
     def get_widget(self):
         """Get the info widget"""

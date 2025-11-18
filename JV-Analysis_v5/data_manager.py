@@ -64,6 +64,9 @@ class DataManager:
         # Store export data
         self.export_jvc_data = None
         self.export_curves_data = None
+        # ADD: Cycle tracking
+        self.has_cycle_data = False
+        self.cycle_info = {}
     
     def load_batch_data(self, batch_ids, output_widget=None):
         """Load data from selected batch IDs"""
@@ -134,14 +137,20 @@ class DataManager:
             return False
     
     def _process_jv_data_for_analysis(self, sample_ids, output_widget=None, batch_ids=None):
-        """Process JV data for analysis from sample IDs"""
+        """Process JV data for analysis from sample IDs with Cycle support"""
         columns_jvc = ['Voc(V)', 'Jsc(mA/cm2)', 'FF(%)', 'PCE(%)', 'V_mpp(V)', 'J_mpp(mA/cm2)',
                       'P_mpp(mW/cm2)', 'R_series(Ohmcm2)', 'R_shunt(Ohmcm2)', 'sample', 'batch',
-                      'condition', 'cell', 'direction', 'ilum', 'status', 'sample_id']
+                      'condition', 'cell', 'direction', 'ilum', 'status', 'sample_id',
+                      'px_number', 'cycle_number']
         
-        columns_cur = ['index', 'sample', 'batch', 'condition', 'variable', 'cell', 'direction', 'ilum', 'sample_id', 'status']
+        columns_cur = ['index', 'sample', 'batch', 'condition', 'variable', 'cell', 'direction', 
+                      'ilum', 'sample_id', 'status', 'px_number', 'cycle_number']
         rows_jvc = []
         rows_cur = []
+        
+        # CRITICAL FIX: Initialize cycle tracking variables
+        has_any_cycle_data = False
+        cycle_counts = {}
         
         try:
             url = self.auth_manager.url
@@ -151,12 +160,11 @@ class DataManager:
                 with output_widget:
                     print("Fetching JV data...")
             
-            # Process each batch individually to handle corrupted ones
+            # Process each batch individually
             all_jvs = {}
             successful_batches = []
             failed_batches = []
             
-            # Group sample_ids by batch for individual processing
             from api_calls import get_ids_in_batch
             
             for batch_id in batch_ids:
@@ -168,9 +176,6 @@ class DataManager:
                     batch_sample_ids = get_ids_in_batch(url, token, [batch_id])
                     batch_jvs = get_all_JV(url, token, batch_sample_ids)
                     
-                    #HIER FEHLENDE JV ID WEGFILTERN! TODO
-                    
-                    # Merge this batch's data into the main collection
                     all_jvs.update(batch_jvs)
                     successful_batches.append(batch_id)
                     
@@ -193,183 +198,250 @@ class DataManager:
                     if failed_batches:
                         print(f"⚠️ Skipped {len(failed_batches)} corrupted batches: {failed_batches}")
             
-            # Continue with the successfully loaded data
             if not all_jvs:
                 if output_widget:
                     with output_widget:
                         print("❌ No valid JV data could be loaded from any batch")
-                return pd.DataFrame(), pd.DataFrame()
-            '''
-            # First pass: determine maximum number of data points across all curves
-            max_data_points = 0
-            for sid in sample_ids:
-                jv_res = all_jvs.get(sid, [])
-                for jv_data, jv_md in jv_res:
-                    for c in jv_data["jv_curve"]:
-                        max_data_points = max(max_data_points, len(c["voltage"]), len(c["current_density"]))
-            '''
+                return pd.DataFrame(columns=columns_jvc), pd.DataFrame(columns=columns_cur)
             
+            # Calculate max data points
             max_data_points = 0
             for sid in sample_ids:
                 jv_res = all_jvs.get(sid, [])
                 for jv_data, jv_md in jv_res:
-                    #make sure JV curve exists
                     if not jv_data or "jv_curve" not in jv_data or not jv_data["jv_curve"]:
-                        if output_widget:
-                            with output_widget:
-                                print(f"⚠️ Sample {sid} hat keine JV-Kurve – wird übersprungen.")
                         continue
                     for c in jv_data["jv_curve"]:
-                        max_data_points = max(max_data_points, len(c["voltage"]), len(c["current_density"]))
+                        max_data_points = max(max_data_points, len(c.get("voltage", [])), len(c.get("current_density", [])))
             
-            # Add data point columns to columns_cur
             for i in range(max_data_points):
                 columns_cur.append(i)
             
-            # Second pass: process the data with correct column structure
+            # DIAGNOSTIC: Print first few descriptions to see format
+            if output_widget:
+                with output_widget:
+                    print(f"\n🔍 Checking JV data structure for cycle information...")
+                    sample_count = 0
+                    for sid in list(all_jvs.keys())[:3]:  # Check first 3 samples
+                        jv_res = all_jvs.get(sid, [])
+                        for jv_data, jv_md in jv_res[:2]:  # Check first 2 measurements per sample
+                            if jv_data:
+                                desc = jv_data.get("description", "")
+                                print(f"   Sample {sid}: description = '{desc}'")
+                                sample_count += 1
+                                if sample_count >= 5:
+                                    break
+                        if sample_count >= 5:
+                            break
+            
+            # Process data with ENHANCED cycle extraction
             for sid in sample_ids:
                 jv_res = all_jvs.get(sid, [])
-                if output_widget:
-                    with output_widget:
-                        print(f"Processing: {sid}")
                 
                 for jv_data, jv_md in jv_res:
-                    # Skip if jv_data is None or doesn't contain jv_curve
-                    if not jv_data or "jv_curve" not in jv_data:
-                        if output_widget:
-                            with output_widget:
-                                print(f"⚠️ Sample {sid} has no JV curve data - skipping")
-                        continue
-                    
-                    # Skip if jv_curve is empty
-                    if not jv_data["jv_curve"]:
-                        if output_widget:
-                            with output_widget:
-                                print(f"⚠️ Sample {sid} has empty JV curve - skipping")
+                    if not jv_data or "jv_curve" not in jv_data or not jv_data["jv_curve"]:
                         continue
                     
                     status = extract_status_from_metadata(jv_data, jv_md)
-                    for c in jv_data["jv_curve"]:
-                        file_name = os.path.join("../", jv_md["upload_id"], jv_data.get("data_file"))
-                        illum = "Dark" if "dark" in c["cell_name"].lower() else "Light"
-                        cell = c["cell_name"][0]
+                    
+                    # CRITICAL FIX: Extract from BOTH filename AND description
+                    # Example description: "Notes from file name: px3Cycle_0"
+                    # Example filename: "KIT_HaGu_20251113_K16_0_K16.px3Cycle_0.jv.csv"
+                    filename = jv_data.get("data_file", "")
+                    description = jv_data.get("description", "")
+                    
+                    import re
+                    
+                    # Strategy 1: Extract pixel number (px#)
+                    px_number = None
+                    
+                    # Pattern 1: From description "Notes from file name: px3Cycle_0"
+                    desc_match = re.search(r'px(\d+)Cycle', description, re.IGNORECASE)
+                    if desc_match:
+                        px_number = f"px{desc_match.group(1)}"
+                    
+                    # Pattern 2: From filename ".px3Cycle_0"
+                    if not px_number:
+                        file_match = re.search(r'\.px(\d+)Cycle', filename, re.IGNORECASE)
+                        if file_match:
+                            px_number = f"px{file_match.group(1)}"
+                    
+                    # Strategy 2: Extract cycle number (Cycle_#)
+                    cycle_number = None
+                    
+                    # Pattern 1: From description "Notes from file name: px3Cycle_0"
+                    desc_cycle_match = re.search(r'Cycle_(\d+)', description, re.IGNORECASE)
+                    if desc_cycle_match:
+                        cycle_number = int(desc_cycle_match.group(1))
+                        has_any_cycle_data = True
                         
-                        # CORRECTED: Use cell_name pattern matching like in your API call
+                        cycle_key = f"{sid}_{px_number}"
+                        if cycle_key not in cycle_counts:
+                            cycle_counts[cycle_key] = set()
+                        cycle_counts[cycle_key].add(cycle_number)
+                    
+                    # Pattern 2: From filename "Cycle_0"
+                    if cycle_number is None:
+                        file_cycle_match = re.search(r'Cycle_(\d+)', filename, re.IGNORECASE)
+                        if file_cycle_match:
+                            cycle_number = int(file_cycle_match.group(1))
+                            has_any_cycle_data = True
+                            
+                            cycle_key = f"{sid}_{px_number}"
+                            if cycle_key not in cycle_counts:
+                                cycle_counts[cycle_key] = set()
+                            cycle_counts[cycle_key].add(cycle_number)
+                    
+                    # Process each JV curve
+                    for c in jv_data["jv_curve"]:
+                        file_name = os.path.join("../", jv_md["upload_id"], jv_data.get("data_file", "unknown"))
+                        illum = "Dark" if "dark" in c.get("cell_name", "").lower() else "Light"
+                        cell = c.get("cell_name", [""])[0] if c.get("cell_name") else ""
+                        
+                        # Direction detection
                         cell_name = c.get("cell_name", "")
                         curve_name = c.get("name", "")
                         
-                        # Primary method: Check cell_name for "Current density [1]" or "Current density [2]"
                         if "Current density [1]" in cell_name or "[1]" in cell_name:
-                            direction = "Reverse"  # backwards
+                            direction = "Reverse"
                         elif "Current density [2]" in cell_name or "[2]" in cell_name:
-                            direction = "Forward"  # forwards
-                        # Fallback 1: Check name field for "Reverse Scan" / "Forward Scan"
+                            direction = "Forward"
                         elif "forward scan" in curve_name.lower() or "forward" in curve_name.lower():
                             direction = "Forward"
                         elif "reverse scan" in curve_name.lower() or "reverse" in curve_name.lower():
                             direction = "Reverse"
-                        # Fallback 2: Check cell_name for common patterns
                         elif "for" in cell_name.lower() or "fwd" in cell_name.lower():
                             direction = "Forward"
                         elif "rev" in cell_name.lower() or "back" in cell_name.lower():
                             direction = "Reverse"
-                        # Fallback 3: Check filename
-                        elif "fwd" in file_name.lower():
-                            direction = "Forward"
-                        elif "rev" in file_name.lower():
-                            direction = "Reverse"
                         else:
-                            # Default fallback
-                            direction = "Reverse"
-                            if output_widget:
-                                with output_widget:
-                                    print(f"⚠️ Could not identify direction for cell_name='{cell_name}', assuming Reverse")
-                        
-                        # DEBUG: Log first few direction assignments with more detail
-                        if output_widget and hasattr(self, '_direction_debug_count'):
-                            if self._direction_debug_count < 10:
-                                with output_widget:
-                                    print(f"   DEBUG #{self._direction_debug_count + 1}:")
-                                    print(f"      cell_name: '{cell_name}'")
-                                    print(f"      name: '{curve_name}'")
-                                    print(f"      -> direction: '{direction}'")
-                                self._direction_debug_count += 1
-                        elif output_widget and not hasattr(self, '_direction_debug_count'):
-                            self._direction_debug_count = 0
-                            with output_widget:
-                                print(f"\n🔍 Direction Detection Debug Info:")
+                            direction = "Reverse"  # Default
 
-                        # Extract the sample name: split by '/' to get filename, then split by '.' to remove extension
-                        sample_clean = file_name.split('/')[-1].split('.')[0]
+                        sample_clean = file_name.split('/')[-1].split('.')[0] if '/' in file_name else file_name
+                        batch_id = file_name.split("/")[1] if "/" in file_name and len(file_name.split("/")) > 1 else "unknown"
                         
-                        # JV data processing with sample_id
+                        # Build JV row
                         row = [
-                            c["open_circuit_voltage"],
-                            -c["short_circuit_current_density"],
-                            100 * c["fill_factor"],
-                            c["efficiency"],
-                            c["potential_at_maximum_power_point"],
-                            -c["current_density_at_maximun_power_point"],
-                            -c["potential_at_maximum_power_point"] * c["current_density_at_maximun_power_point"],
-                            c["series_resistance"],
-                            c["shunt_resistance"],
+                            c.get("open_circuit_voltage", 0),
+                            -c.get("short_circuit_current_density", 0),
+                            100 * c.get("fill_factor", 0),
+                            c.get("efficiency", 0),
+                            c.get("potential_at_maximum_power_point", 0),
+                            -c.get("current_density_at_maximun_power_point", 0),
+                            -c.get("potential_at_maximum_power_point", 0) * c.get("current_density_at_maximun_power_point", 0),
+                            c.get("series_resistance", 0),
+                            c.get("shunt_resistance", 0),
                             sample_clean,
-                            file_name.split("/")[1],
+                            batch_id,
                             "w",
                             cell,
                             direction,
                             illum,
                             status,
-                            sid  # API sample ID
+                            sid,
+                            px_number,
+                            cycle_number
                         ]
                         rows_jvc.append(row)
                         
-                        # Process voltage data with proper padding
+                        # Build voltage row
                         row_v = [
                             "_".join(["Voltage (V)", cell, direction, illum]),
                             sample_clean,
-                            file_name.split("/")[1],
+                            batch_id,
                             "w",
                             "Voltage (V)",
                             cell,
                             direction,
                             illum,
-                            sid,  # API sample ID
-                            status  # ADD status to curves data
+                            sid,
+                            status,
+                            px_number,
+                            cycle_number
                         ]
-                        # Extend with voltage data and pad with None if needed
-                        voltage_data = c["voltage"] + [None] * (max_data_points - len(c["voltage"]))
+                        voltage_data = c.get("voltage", []) + [None] * (max_data_points - len(c.get("voltage", [])))
                         row_v.extend(voltage_data)
                         
-                        # Process current density data with proper padding
+                        # Build current row
                         row_j = [
                             "_".join(["Current Density(mA/cm2)", cell, direction, illum]),
                             sample_clean,
-                            file_name.split("/")[1],
+                            batch_id,
                             "w",
                             "Current Density(mA/cm2)",
                             cell,
                             direction,
                             illum,
-                            sid,  # API sample ID
-                            status  # ADD status to curves data
+                            sid,
+                            status,
+                            px_number,
+                            cycle_number
                         ]
-                        # Extend with current data and pad with None if needed
-                        current_data = c["current_density"] + [None] * (max_data_points - len(c["current_density"]))
+                        current_data = c.get("current_density", []) + [None] * (max_data_points - len(c.get("current_density", [])))
                         row_j.extend(current_data)
                         
                         rows_cur.append(row_v)
                         rows_cur.append(row_j)
-            
-            df_jvc = pd.DataFrame(rows_jvc, columns=columns_jvc)
-            df_cur = pd.DataFrame(rows_cur, columns=columns_cur)
-            
-            return df_jvc, df_cur
-            
+        
         except Exception as e:
-            ErrorHandler.handle_data_loading_error(e, output_widget)
-            return pd.DataFrame(), pd.DataFrame()
-
+            if output_widget:
+                with output_widget:
+                    print(f"❌ Error processing JV data: {e}")
+                    import traceback
+                    traceback.print_exc()
+            return pd.DataFrame(columns=columns_jvc), pd.DataFrame(columns=columns_cur)
+        
+        # Create DataFrames
+        df_jvc = pd.DataFrame(rows_jvc, columns=columns_jvc)
+        df_cur = pd.DataFrame(rows_cur, columns=columns_cur)
+        
+        # Store cycle information
+        self.has_cycle_data = has_any_cycle_data
+        self.cycle_info = cycle_counts
+        
+        # ENHANCED DIAGNOSTICS
+        if output_widget:
+            with output_widget:
+                print(f"\n📊 Cycle Data Extraction Results:")
+                print(f"   Total JV records created: {len(df_jvc)}")
+                print(f"   Has cycle data flag: {has_any_cycle_data}")
+                print(f"   Cycle combinations found: {len(cycle_counts)}")
+                
+                if 'cycle_number' in df_jvc.columns:
+                    non_null_cycles = df_jvc['cycle_number'].notna().sum()
+                    print(f"   Records with cycle_number: {non_null_cycles}")
+                    
+                    if non_null_cycles > 0:
+                        unique_cycles = df_jvc['cycle_number'].dropna().unique()
+                        print(f"   Unique cycle numbers: {sorted(unique_cycles.tolist())}")
+                        print(f"   Sample values:")
+                        sample_df = df_jvc[df_jvc['cycle_number'].notna()][['sample', 'px_number', 'cycle_number', 'PCE(%)']].head(3)
+                        for _, row in sample_df.iterrows():
+                            print(f"      {row['sample']} / {row['px_number']} / Cycle {int(row['cycle_number'])} / PCE: {row['PCE(%)']:.2f}%")
+                    else:
+                        print(f"   ⚠️ No cycle numbers were extracted!")
+                        print(f"   This means either:")
+                        print(f"      • No 'Cycle_' pattern found in descriptions")
+                        print(f"      • Description format is different than expected")
+        
+        # Report detailed cycle statistics if found
+        if output_widget and has_any_cycle_data and len(cycle_counts) > 0:
+            with output_widget:
+                print(f"\n✅ Cycle Information Successfully Detected:")
+                print(f"   Found cycles in {len(cycle_counts)} sample-pixel combinations")
+                
+                total_measurements = sum(len(cycles) for cycles in cycle_counts.values())
+                max_cycles_per_pixel = max(len(cycles) for cycles in cycle_counts.values())
+                
+                print(f"   Total unique cycle measurements: {total_measurements}")
+                print(f"   Maximum cycles per pixel: {max_cycles_per_pixel}")
+                
+                print(f"\n   Cycle distribution examples:")
+                for i, (key, cycles) in enumerate(list(cycle_counts.items())[:5]):
+                    print(f"      {key}: {len(cycles)} cycles → {sorted(cycles)}")
+        
+        return df_jvc, df_cur
+    
     def _create_matching_curves_from_filtered_jv(self, filtered_jv_df):
         """Create curves data that exactly matches filtered JV data using sample_id"""
         if not hasattr(self, 'data') or 'curves' not in self.data or filtered_jv_df.empty:
@@ -717,3 +789,115 @@ class DataManager:
     def has_export_data(self):
         """Check if export data is available"""
         return self.export_jvc_data is not None and self.export_curves_data is not None
+    
+    def apply_best_cycle_filter(self, data=None, verbose=True):
+        """
+        Filter data to keep only the best cycle (highest PCE) per sample-pixel combination.
+        
+        Args:
+            data: DataFrame to filter (default: self.data['jvc'])
+            verbose: Print filter statistics
+        
+        Returns:
+            Filtered DataFrame with only best cycles
+        """
+        if data is None:
+            data = self.data.get('jvc')
+        
+        if data is None or data.empty:
+            return data
+        
+        # Check if cycle data exists
+        if 'cycle_number' not in data.columns or data['cycle_number'].isna().all():
+            if verbose:
+                print("ℹ️ No cycle information found in data - no filtering applied")
+            return data
+        
+        # Group by sample, px_number, cell, direction, ilum
+        # Keep only the row with maximum PCE for each group
+        grouping_cols = ['sample', 'px_number', 'cell', 'direction', 'ilum']
+        
+        # Filter out rows without valid grouping information
+        valid_data = data.dropna(subset=grouping_cols)
+        
+        if valid_data.empty:
+            if verbose:
+                print("⚠️ No valid data for cycle filtering")
+            return data
+        
+        # Find best cycle per group
+        best_cycles = valid_data.loc[valid_data.groupby(grouping_cols)['PCE(%)'].idxmax()]
+        
+        if verbose:
+            original_count = len(data)
+            filtered_count = len(best_cycles)
+            removed_count = original_count - filtered_count
+            
+            print(f"\n🔄 Best Cycle Filter Applied:")
+            print(f"   Original measurements: {original_count}")
+            print(f"   After filtering: {filtered_count}")
+            print(f"   Removed (non-best cycles): {removed_count}")
+            
+            # Show cycle distribution
+            if 'cycle_number' in best_cycles.columns:
+                cycle_dist = best_cycles['cycle_number'].value_counts().sort_index()
+                print(f"\n   Best cycles selected:")
+                for cycle, count in cycle_dist.items():
+                    if pd.notna(cycle):
+                        print(f"      Cycle {int(cycle)}: {count} pixels")
+        
+        return best_cycles
+    
+    def apply_specific_cycle_filter(self, data=None, selected_cycles=None, verbose=True):
+        """
+        Filter data to keep only specific cycle numbers.
+        
+        Args:
+            data: DataFrame to filter (default: self.data['jvc'])
+            selected_cycles: List of cycle numbers to keep (e.g., [0, 1])
+            verbose: Print filter statistics
+        
+        Returns:
+            Filtered DataFrame with only selected cycles
+        """
+        if data is None:
+            data = self.data.get('jvc')
+        
+        if data is None or data.empty:
+            return data
+        
+        if not selected_cycles:
+            if verbose:
+                print("ℹ️ No specific cycles selected - keeping all data")
+            return data
+        
+        # Check if cycle data exists
+        if 'cycle_number' not in data.columns or data['cycle_number'].isna().all():
+            if verbose:
+                print("ℹ️ No cycle information found in data - no filtering applied")
+            return data
+        
+        # Filter for selected cycles
+        mask = data['cycle_number'].isin(selected_cycles)
+        filtered_data = data[mask].copy()
+        
+        if verbose:
+            original_count = len(data)
+            filtered_count = len(filtered_data)
+            removed_count = original_count - filtered_count
+            
+            print(f"\n🔢 Specific Cycle Filter Applied:")
+            print(f"   Selected cycles: {sorted(selected_cycles)}")
+            print(f"   Original measurements: {original_count}")
+            print(f"   After filtering: {filtered_count}")
+            print(f"   Removed (other cycles): {removed_count}")
+            
+            # Show distribution of kept cycles
+            if 'cycle_number' in filtered_data.columns and not filtered_data.empty:
+                cycle_dist = filtered_data['cycle_number'].value_counts().sort_index()
+                print(f"\n   Kept measurements per cycle:")
+                for cycle, count in cycle_dist.items():
+                    if pd.notna(cycle):
+                        print(f"      Cycle {int(cycle)}: {count} measurements")
+        
+        return filtered_data
