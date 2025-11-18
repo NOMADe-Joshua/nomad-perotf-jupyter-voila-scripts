@@ -253,8 +253,52 @@ class DataManager:
                         file_name = os.path.join("../", jv_md["upload_id"], jv_data.get("data_file"))
                         illum = "Dark" if "dark" in c["cell_name"].lower() else "Light"
                         cell = c["cell_name"][0]
-                        direction = "Forward" if "for" in c["cell_name"].lower() else "Reverse"
-    
+                        
+                        # CORRECTED: Use cell_name pattern matching like in your API call
+                        cell_name = c.get("cell_name", "")
+                        curve_name = c.get("name", "")
+                        
+                        # Primary method: Check cell_name for "Current density [1]" or "Current density [2]"
+                        if "Current density [1]" in cell_name or "[1]" in cell_name:
+                            direction = "Reverse"  # backwards
+                        elif "Current density [2]" in cell_name or "[2]" in cell_name:
+                            direction = "Forward"  # forwards
+                        # Fallback 1: Check name field for "Reverse Scan" / "Forward Scan"
+                        elif "forward scan" in curve_name.lower() or "forward" in curve_name.lower():
+                            direction = "Forward"
+                        elif "reverse scan" in curve_name.lower() or "reverse" in curve_name.lower():
+                            direction = "Reverse"
+                        # Fallback 2: Check cell_name for common patterns
+                        elif "for" in cell_name.lower() or "fwd" in cell_name.lower():
+                            direction = "Forward"
+                        elif "rev" in cell_name.lower() or "back" in cell_name.lower():
+                            direction = "Reverse"
+                        # Fallback 3: Check filename
+                        elif "fwd" in file_name.lower():
+                            direction = "Forward"
+                        elif "rev" in file_name.lower():
+                            direction = "Reverse"
+                        else:
+                            # Default fallback
+                            direction = "Reverse"
+                            if output_widget:
+                                with output_widget:
+                                    print(f"⚠️ Could not identify direction for cell_name='{cell_name}', assuming Reverse")
+                        
+                        # DEBUG: Log first few direction assignments with more detail
+                        if output_widget and hasattr(self, '_direction_debug_count'):
+                            if self._direction_debug_count < 10:
+                                with output_widget:
+                                    print(f"   DEBUG #{self._direction_debug_count + 1}:")
+                                    print(f"      cell_name: '{cell_name}'")
+                                    print(f"      name: '{curve_name}'")
+                                    print(f"      -> direction: '{direction}'")
+                                self._direction_debug_count += 1
+                        elif output_widget and not hasattr(self, '_direction_debug_count'):
+                            self._direction_debug_count = 0
+                            with output_widget:
+                                print(f"\n🔍 Direction Detection Debug Info:")
+
                         # Extract the sample name: split by '/' to get filename, then split by '.' to remove extension
                         sample_clean = file_name.split('/')[-1].split('.')[0]
                         

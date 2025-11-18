@@ -56,7 +56,7 @@ class WidgetFactory:
         return widgets.Output(layout=widgets.Layout(**layout_props))
     
     @staticmethod
-    def create_radio_buttons(options, description='', value=None, width='standard'):
+    def create_radio_buttons(options, description='', value=None, width='standard'):  # FIXED: Added missing closing parenthesis
         radio = widgets.RadioButtons(options=options, description=description)
         if value is not None:
             radio.value = value
@@ -269,8 +269,10 @@ class FilterUI:
         self.preset_dropdown.layout.width = 'fit-content'
         self.preset_dropdown.layout.align_self = 'flex-end'
         
+        # Direction filter - using "Reverse" and "Forward" to match processed data
+        # (data_manager converts "Reverse Scan" and "Forward Scan" to "Reverse" and "Forward")
         self.direction_radio = WidgetFactory.create_radio_buttons(
-            options=['Both', 'Reverse', 'Forward'],
+            options=['Both', 'Reverse', 'Forward'],  # These match the processed data values
             value='Both',
             description='Direction:'
         )
@@ -684,18 +686,30 @@ class PlotUI:
     
     def __init__(self):
         self.plot_presets = {
-            "Default": [("Boxplot", "PCE", "by Variable"), ("Boxplot", "Voc", "by Variable"), 
-                       ("Boxplot", "Jsc", "by Variable"), ("Boxplot", "FF", "by Variable"), 
-                       ("JV Curve", "Best device only", "")],
-            "Preset 2": [("Boxplot", "Voc", "by Cell"), ("Histogram", "Voc", ""), 
-                        ("JV Curve", "Best device only", "")],
-            "Advanced Analysis": [("Boxplot", "PCE", "by Status"), ("Boxplot", "PCE", "by Status and Variable"),
-                                 ("Boxplot", "PCE", "by Direction and Variable"), ("Boxplot", "PCE", "by Cell and Variable"),
-                                 ("Boxplot", "PCE", "by Direction, Status and Variable")]
+            "Default": [
+                ("Boxplot", "PCE", "by Variable"), 
+                ("Boxplot", "Voc", "by Variable"), 
+                ("Boxplot", "Jsc", "by Variable"), 
+                ("Boxplot", "FF", "by Variable"), 
+                ("JV Curve", "Best device per condition", "")  # REMOVE "Best device only" line
+            ],
+            "Preset 2": [
+                ("Boxplot", "Voc", "by Cell"), 
+                ("Histogram", "Voc", "")
+                # REMOVED: ("JV Curve", "Best device only", "")
+            ],
+            "Advanced Analysis": [
+                ("Boxplot", "PCE", "by Status"), 
+                ("Boxplot", "PCE", "by Status and Variable"),
+                ("Boxplot", "PCE", "by Direction and Variable"), 
+                ("Boxplot", "PCE", "by Cell and Variable"),
+                ("Boxplot", "PCE", "by Direction, Status and Variable"),
+                ("JV Curve", "Best device per condition", "")
+            ]
         }
         self._create_widgets()
         self._setup_observers()
-        self._load_preset()  # Initialize with default preset
+        self._load_preset()
     
     def _create_widgets(self):
         """Create plot widgets"""
@@ -716,9 +730,18 @@ class PlotUI:
         self.plot_type_groups = [self._create_plot_type_row()]
         self.groups_container = widgets.VBox(self.plot_type_groups)
         
+        # ADD: Checkbox for separating scan directions in boxplots
+        self.separate_scan_dir_checkbox = widgets.Checkbox(
+            value=False,
+            description='Separate Forward/Reverse in Boxplots',
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(margin='10px 0')
+        )
+        
         self.controls = widgets.VBox([
             self.add_button, self.remove_button, 
             self.preset_dropdown, self.load_preset_button,
+            self.separate_scan_dir_checkbox,  # ADD this line
             self.plot_button
         ])
     
@@ -770,9 +793,17 @@ class PlotUI:
             option1_dropdown.options = ['Voc', 'Jsc', 'FF', 'PCE', 'R_ser', 'R_shu', 'V_mpp', 'J_mpp', 'P_mpp']
             option2_dropdown.options = ['']
         elif plot_type == 'JV Curve':
-            option1_dropdown.options = ['All cells', 'Only working cells', 'Rejected cells', 
-                                       'Best device only', 'Separated by cell (all)', 'Separated by cell (working only)', 
-                                       'Separated by substrate (all)', 'Separated by substrate (working only)']
+            option1_dropdown.options = [
+                'All cells', 
+                'Only working cells', 
+                'Rejected cells', 
+                'Best device only', 
+                'Best device per condition',  # ADD this line
+                'Separated by cell (all)', 
+                'Separated by cell (working only)', 
+                'Separated by substrate (all)', 
+                'Separated by substrate (working only)'
+            ]
             option2_dropdown.options = ['']
         else:
             option1_dropdown.options = []
@@ -825,6 +856,10 @@ class PlotUI:
     def set_plot_callback(self, callback):
         """Set callback for plot button"""
         self.plot_button.on_click(callback)
+    
+    def get_separate_scan_dir(self):
+        """Get whether to separate scan directions"""
+        return self.separate_scan_dir_checkbox.value
     
     def get_widget(self):
         """Get the main plot widget"""

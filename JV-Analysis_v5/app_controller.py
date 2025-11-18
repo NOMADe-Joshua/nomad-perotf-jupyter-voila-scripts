@@ -600,10 +600,6 @@ If you tested specific variables or conditions for each sample, please write the
             </div>
             """))
         
-        # GET SELECTED COLORS - ADD this line:
-        sampling_method = self.color_selector.sampling_dropdown.value
-        selected_colors = self.color_selector.get_colors(num_colors=None, sampling=sampling_method)
-        
         try:
             # Create workbook for Excel export with proper analysis sheets
             wb = openpyxl.Workbook()
@@ -614,111 +610,131 @@ If you tested specific variables or conditions for each sample, please write the
             for r in dataframe_to_rows(filtered_data, index=True, header=True):
                 main_sheet.append(r)
             
-            # Create analysis sheets for each boxplot
-            from utils import save_combined_excel_data
+            # CRITICAL FIX: Prepare data structures for plotting
+            # Extract filtered data components
+            filtered_jv = data.get('filtered')
+            complete_jv = data.get('jvc')
+            filtered_curves = data.get('filtered_curves', data.get('curves'))  # Use filtered curves or fall back to all curves
             
-            # Variable name mapping (PCE -> PCE(%))
-            variable_mapping = {
-                'PCE': 'PCE(%)',
-                'Voc': 'Voc(V)', 
-                'Jsc': 'Jsc(mA/cm2)',
-                'FF': 'FF(%)',
-                'R_ser': 'R_series(Ohmcm2)',
-                'R_shu': 'R_shunt(Ohmcm2)',
-                'V_mpp': 'V_mpp(V)',
-                'J_mpp': 'J_mpp(mA/cm2)',
-                'P_mpp': 'P_mpp(mW/cm2)'
-            }
+            # Prepare support data tuple
+            omitted_jv = data.get('junk', pd.DataFrame())
+            filter_parameters = self.data_manager.get_filter_parameters()
+            path = os.getcwd()
+            samples = self.data_manager.unique_vals if hasattr(self.data_manager, 'unique_vals') else []
             
-            # Process each boxplot for Excel export
-            for plot_type, option1, option2 in plot_selections:
-                if plot_type in ['Boxplot', 'Boxplot (omitted)']:  # Only process boxplots for Excel
-                    # Extract parameters
-                    var_y = option1  # e.g., 'PCE'
-                    var_x = option2  # e.g., 'by Variable'
-                    name_y = variable_mapping.get(var_y, var_y + '(%)')  # e.g., 'PCE(%)'
-                    
-                    # Determine grouping column
-                    if var_x == 'by Variable':
-                        grouping_col = 'condition'
-                    elif var_x == 'by Batch':
-                        grouping_col = 'batch_for_plotting' if 'batch_for_plotting' in filtered_data.columns else 'batch'
-                    elif var_x == 'by Sample':
-                        grouping_col = 'sample'
-                    elif var_x == 'by Cell':
-                        grouping_col = 'cell'
-                    elif var_x == 'by Scan Direction':
-                        grouping_col = 'direction'
-                    else:
-                        grouping_col = 'condition'  # default
-                    
-                    # Calculate statistical summary
-                    stats_df = filtered_data.groupby(grouping_col)[name_y].describe()
-                    
-                    # Get omitted data and filter parameters from data manager
-                    omitted_data = self.data_manager.get_omitted_data()
-                    filter_params = self.data_manager.get_filter_parameters()
-                    
-                    # Prepare filtered info (omitted data and filter parameters)
-                    filtered_info = (omitted_data if omitted_data is not None else pd.DataFrame(), filter_params)
-                    
-                    # Save to Excel
-                    wb = save_combined_excel_data(
-                        "",
-                        wb,
-                        filtered_data,
-                        filtered_info,
-                        grouping_col,
-                        name_y,
-                        var_y,
-                        stats_df
-                    )
+            # Package data for plotting function
+            jv_data = (filtered_jv, complete_jv, filtered_curves)
+            support_data = (omitted_jv, filter_parameters, self.is_conditions, path, samples)
             
-            # Use the precisely matched curves data instead of all curves
-            filtered_curves = data.get('filtered_curves', pd.DataFrame())
-            if filtered_curves.empty:
-                # Fallback to creating filtered curves if not available
-                filtered_curves = self._create_filtered_curves_data(filtered_data, data["curves"])
+            # GET scan direction separation setting
+            separate_scan_dir = self.plot_ui.get_separate_scan_dir()
             
-            # For JV curve plots, we want ALL curves data for complete plots
-            all_curves_for_plotting = data["curves"]  # Use complete curves data
-            
-            # Create properly filtered curves for working/rejected cell plots
-            filtered_curves_for_jv_plots = self._create_matching_curves_from_filtered_jv(filtered_data, data["curves"])
-
-            # Prepare data tuple with ALL curves for complete dataset access
-            jv_data = (
-                filtered_data,           # filtered data for analysis
-                data["jvc"],            # complete original data for reference  
-                data["curves"]          # CHANGE: Use complete original curves, not filtered_curves
-            )
-            
-            support_data = (
-                data.get('junk', pd.DataFrame()),
-                self.data_manager.get_filter_parameters(), 
-                self.is_conditions, 
-                os.getcwd(), 
-                filtered_curves["sample"].unique().tolist() if 'sample' in filtered_curves.columns else []
-            )
-            
-            # Create plots using the plot manager - ADD color_scheme parameter:
+            # Create plots using the plot manager
             figs, names = plotting_string_action(
                 plot_selections, 
                 jv_data, 
                 support_data, 
                 is_voila=True,
-                color_scheme=selected_colors  # ADD this line
+                color_scheme=selected_colors,
+                separate_scan_dir=separate_scan_dir
             )
+            
+            # CRITICAL FIX: Initialize lists and generate titles/subtitles
+            titles = []
+            subtitles = []
+            
+            # Match each figure with its plot selection
+            selection_idx = 0  # Track which plot selection we're processing
+            
+            for i, fig in enumerate(figs):
+                # Find corresponding plot selection (skip combination plots that generate multiple figures)
+                if selection_idx < len(plot_selections):
+                    plot_type, option1, option2 = plot_selections[selection_idx]
+                    
+                    if plot_type == 'Boxplot' or plot_type == 'Boxplot (omitted)':
+                        # Generate title and subtitle for boxplot
+                        direction_note = " (Separated by Scan Direction)" if separate_scan_dir else ""
+                        datatype = "junk" if "omitted" in plot_type else "data"
+                        title = f"Boxplot of {option1} by {option2.replace('by ', '')}{direction_note}"
+                        title += " (filtered out)" if datatype == "junk" else " (filtered data)"
+                        
+                        filtered_df = data.get('filtered')
+                        num_measurements = len(filtered_df) if filtered_df is not None else 0
+                        
+                        # Handle different grouping columns
+                        grouping_col = option2.replace('by ', '')
+                        if grouping_col == 'Variable':
+                            grouping_col = 'condition'
+                        elif grouping_col == 'Scan Direction':
+                            grouping_col = 'direction'
+                        
+                        num_categories = filtered_df[grouping_col].nunique() if filtered_df is not None and grouping_col in filtered_df.columns else 0
+                        subtitle = f"Data from {num_measurements} measurements across {num_categories} categories"
+                        
+                        titles.append(title)
+                        subtitles.append(subtitle)
+                        selection_idx += 1
+                    
+                    elif plot_type == 'Histogram':
+                        title = f"Histogram of {option1} (Filtered Data)"
+                        titles.append(title)
+                        subtitles.append(None)
+                        selection_idx += 1
+                    
+                    elif plot_type == 'JV Curve':
+                        # JV Curves use title from figure or generate from option
+                        if option1 == 'Best device per condition':
+                            title = f"JV Curves - Best Measurement per Condition"
+                        elif option1 == 'Best device only':
+                            filtered_df = data.get('filtered')
+                            if filtered_df is not None and not filtered_df.empty:
+                                best_idx = filtered_df["PCE(%)"].idxmax()
+                                best_sample = filtered_df.loc[best_idx]["sample"]
+                                best_cell = filtered_df.loc[best_idx]["cell"]
+                                title = f"JV Curves - Best Device ({best_sample} [Cell {best_cell}])"
+                            else:
+                                title = f"JV Curves - {option1}"
+                        else:
+                            title = f"JV Curves - {option1}"
+                        
+                        titles.append(title)
+                        subtitles.append(None)
+                        
+                        # Check if this is a multi-figure plot (separated by cell/substrate)
+                        if 'Separated' not in option1:
+                            selection_idx += 1
+                        else:
+                            # Multi-figure plots: only increment after all figures are processed
+                            # Check if next figure is still part of this selection
+                            if i + 1 >= len(figs) or selection_idx + 1 >= len(plot_selections):
+                                selection_idx += 1
+                    
+                    else:
+                        # Unknown plot type - use filename
+                        titles.append(names[i] if i < len(names) else f"Plot {i+1}")
+                        subtitles.append(None)
+                        selection_idx += 1
+                else:
+                    # No more plot selections - use filename
+                    titles.append(names[i] if i < len(names) else f"Plot {i+1}")
+                    subtitles.append(None)
             
             # Store plot data
             self.global_plot_data['figs'] = figs
             self.global_plot_data['names'] = names
             self.global_plot_data['workbook'] = wb
+            self.global_plot_data['titles'] = titles
+            self.global_plot_data['subtitles'] = subtitles
             
-            # Display plots using resizable plot utility
+            # Display plots
             with self.plot_ui.plotted_content:
                 clear_output(wait=True)
-                ResizablePlotManager.display_plots_resizable(figs, names, self.plot_ui.plotted_content)
+                ResizablePlotManager.display_plots_resizable(
+                    figs, names, 
+                    titles=titles,
+                    subtitles=subtitles,
+                    container_widget=self.plot_ui.plotted_content
+                )
                 print("Proceed to the next tab to save your results.")
                 self._enable_tab(4)
         

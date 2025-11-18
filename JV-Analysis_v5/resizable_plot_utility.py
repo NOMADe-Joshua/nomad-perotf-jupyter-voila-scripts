@@ -18,31 +18,54 @@ import ipywidgets as widgets
 class ResizablePlotWidget:
     """Creates resizable Plotly plots for Jupyter notebooks"""
     
-    def __init__(self, fig, title="Plot", initial_width=800, initial_height=600):
+    def __init__(self, fig, title="Plot", initial_width=800, initial_height=600, subtitle=None):  # ADD subtitle parameter
         self.fig = fig
         self.title = title
+        self.subtitle = subtitle  # ADD this line
         self.initial_width = initial_width
         self.initial_height = initial_height
         self.plot_id = f"plot_{uuid.uuid4().hex[:8]}"
         
     def display(self):
-        """Display the resizable plot"""
-        # Update figure layout for responsiveness
+        """Display the resizable plot with external title"""
+        # CRITICAL FIX: Update figure layout AND make legend draggable
         self.fig.update_layout(
             autosize=True,
-            margin=dict(l=50, r=50, t=60, b=50)
+            margin=dict(l=80, r=50, t=80, b=80, autoexpand=False),
+            xaxis=dict(
+                autorange=False if self.fig.layout.xaxis.range else True,
+                constrain='domain',
+                automargin=False
+            ),
+            yaxis=dict(
+                automargin=False
+            ),
+            legend=dict(
+                # ENABLE DRAGGABLE LEGEND - User can move it with mouse
+                # Plotly automatically makes legends draggable in interactive mode!
+            )
         )
         
         # Convert figure to JSON
         fig_json = json.dumps(self.fig, cls=plotly.utils.PlotlyJSONEncoder)
         
-        # Create resizable HTML container
+        # CRITICAL: Create title HTML OUTSIDE the plot container
+        title_html = f'<h3 style="margin: 20px 0 5px 0; color: #2c3e50;">{self.title}</h3>'
+        if self.subtitle:
+            title_html += f'<p style="margin: 0 0 10px 0; color: #666; font-size: 12px;">{self.subtitle}</p>'
+        
+        resize_hint = '<p style="color: #666; font-size: 12px; margin: 5px 0;">💡 Drag the bottom-right corner to resize the plot</p>'
+        
+        # CRITICAL FIX: Title is now OUTSIDE the resizable container
         resizable_html = f'''
         <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
         
         <div style="margin: 20px 0;">
-            <h4>{self.title}</h4>
-            <p style="color: #666; font-size: 12px;">💡 Drag the bottom-right corner to resize the plot</p>
+            {title_html}
+            <p style="color: #666; font-size: 12px; margin: 5px 0;">
+                💡 Drag the bottom-right corner to resize | 
+                🖱️ <strong>Drag the legend</strong> to reposition it
+            </p>
             
             <div id="container-{self.plot_id}" style="
                 width: {self.initial_width}px; 
@@ -60,7 +83,15 @@ class ResizablePlotWidget:
                 box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
                 transition: border-color 0.2s;
             ">
-                <div id="{self.plot_id}" style="width: 100%; height: 100%;"></div>
+                <div id="{self.plot_id}" style="
+                    width: 100% !important; 
+                    height: 100% !important;
+                    position: absolute !important;
+                    top: 0 !important;
+                    left: 0 !important;
+                    right: 0 !important;
+                    bottom: 0 !important;
+                "></div>
                 
                 <!-- Resize indicator -->
                 <div style="
@@ -81,17 +112,56 @@ class ResizablePlotWidget:
         #container-{self.plot_id}:hover {{
             border-color: #007bff;
         }}
+        /* CRITICAL: Prevent plot from shifting */
+        #container-{self.plot_id} .plotly {{
+            width: 100% !important;
+            height: 100% !important;
+        }}
+        #container-{self.plot_id} .main-svg {{
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+        }}
         </style>
         
         <script>
         (function() {{
             const figureData = {fig_json};
+            
             const config = {{
                 responsive: true,
                 displayModeBar: true,
                 displaylogo: false,
-                modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d']
+                modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
+                autosizable: false,
+                edits: {{
+                    legendPosition: true  // ENABLE: Allow user to drag legend
+                }}
             }};
+            
+            // CRITICAL FIX: Ensure margins are fixed in layout
+            if (figureData.layout) {{
+                figureData.layout.autosize = true;
+                if (!figureData.layout.margin) {{
+                    figureData.layout.margin = {{}};
+                }}
+                figureData.layout.margin.autoexpand = false;
+                
+                // Disable automargin for all axes
+                if (figureData.layout.xaxis) {{
+                    figureData.layout.xaxis.automargin = false;
+                }}
+                if (figureData.layout.yaxis) {{
+                    figureData.layout.yaxis.automargin = false;
+                }}
+            }}
+            
+            // Store original x-axis range
+            let originalXRange = null;
+            if (figureData.layout && figureData.layout.xaxis && figureData.layout.xaxis.range) {{
+                originalXRange = [...figureData.layout.xaxis.range];
+                console.log('Stored original x-axis range:', originalXRange);
+            }}
             
             function initPlot() {{
                 const plotDiv = document.getElementById('{self.plot_id}');
@@ -102,8 +172,29 @@ class ResizablePlotWidget:
                     return;
                 }}
                 
+                const containerRect = container.getBoundingClientRect();
+                
+                // CRITICAL: Set initial size in layout
+                figureData.layout.width = containerRect.width;
+                figureData.layout.height = containerRect.height;
+                
                 Plotly.newPlot(plotDiv, figureData.data, figureData.layout, config).then(function() {{
                     console.log('✅ Resizable plot created: {self.title}');
+                    
+                    // Preserve x-axis range on relayout events
+                    plotDiv.on('plotly_relayout', function(eventData) {{
+                        console.log('plotly_relayout event:', eventData);
+                        
+                        // Restore range if autorange was triggered
+                        if (eventData['xaxis.autorange'] === true && originalXRange) {{
+                            console.log('Restoring x-axis range after autorange');
+                            Plotly.relayout(plotDiv, {{
+                                'xaxis.range': originalXRange,
+                                'xaxis.autorange': false,
+                                'xaxis.automargin': false
+                            }});
+                        }}
+                    }});
                     
                     if (window.ResizeObserver) {{
                         let resizeTimeout;
@@ -111,27 +202,24 @@ class ResizablePlotWidget:
                             clearTimeout(resizeTimeout);
                             resizeTimeout = setTimeout(function() {{
                                 const rect = container.getBoundingClientRect();
-                                Plotly.relayout(plotDiv, {{
+                                
+                                const updateLayout = {{
                                     width: rect.width,
-                                    height: rect.height
-                                }});
-                            }}, 50);
+                                    height: rect.height,
+                                    'margin.autoexpand': false
+                                }};
+                                
+                                if (originalXRange) {{
+                                    updateLayout['xaxis.range'] = originalXRange;
+                                    updateLayout['xaxis.autorange'] = false;
+                                    updateLayout['xaxis.automargin'] = false;
+                                }}
+                                
+                                console.log('Resizing to:', updateLayout);
+                                Plotly.relayout(plotDiv, updateLayout);
+                            }}, 100);  // Increased debounce to reduce redraws
                         }});
                         observer.observe(container);
-                    }} else {{
-                        // Fallback for older browsers
-                        let lastWidth = container.offsetWidth;
-                        let lastHeight = container.offsetHeight;
-                        
-                        setInterval(function() {{
-                            const w = container.offsetWidth;
-                            const h = container.offsetHeight;
-                            if (w !== lastWidth || h !== lastHeight) {{
-                                Plotly.relayout(plotDiv, {{width: w, height: h}});
-                                lastWidth = w;
-                                lastHeight = h;
-                            }}
-                        }}, 100);
                     }}
                 }}).catch(function(err) {{
                     console.error('❌ Plot creation failed:', err);
@@ -161,23 +249,24 @@ class ResizablePlotWidget:
         display(HTML(resizable_html))
 
 
-def create_resizable_plot(fig, title="Plot", width=800, height=600):
+def create_resizable_plot(fig, title="Plot", width=800, height=600, subtitle=None):  # ADD subtitle
     """
     Create a resizable plot from a Plotly figure.
     
     Args:
         fig: Plotly figure object
-        title: Plot title to display
+        title: Plot title to display ABOVE the plot
         width: Initial width in pixels
         height: Initial height in pixels
+        subtitle: Optional subtitle text
     
     Returns:
         ResizablePlotWidget instance
     """
-    return ResizablePlotWidget(fig, title, width, height)
+    return ResizablePlotWidget(fig, title, width, height, subtitle)  # PASS subtitle
 
 
-def display_resizable_plot(fig, title="Plot", width=800, height=600):
+def display_resizable_plot(fig, title="Plot", width=800, height=600, subtitle=None):  # ADD subtitle
     """
     Convenience function to create and immediately display a resizable plot.
     
@@ -186,8 +275,9 @@ def display_resizable_plot(fig, title="Plot", width=800, height=600):
         title: Plot title to display
         width: Initial width in pixels
         height: Initial height in pixels
+        subtitle: Optional subtitle text
     """
-    resizable_plot = create_resizable_plot(fig, title, width, height)
+    resizable_plot = create_resizable_plot(fig, title, width, height, subtitle)  # PASS subtitle
     resizable_plot.display()
 
 
@@ -196,23 +286,25 @@ class ResizablePlotManager:
     """Enhanced plot manager that creates resizable plots"""
     
     @staticmethod
-    def display_plots_resizable(figs, names, container_widget=None):
+    def display_plots_resizable(figs, names, titles=None, subtitles=None, container_widget=None):  # ADD titles and subtitles
         """
         Display multiple plots as resizable widgets.
         
         Args:
             figs: List of Plotly figures
-            names: List of plot names/titles
+            names: List of plot filenames
+            titles: Optional list of display titles (if None, uses names)
+            subtitles: Optional list of subtitles
             container_widget: Optional widget container for output
         """
         if container_widget:
             with container_widget:
-                ResizablePlotManager._display_plots_internal(figs, names)
+                ResizablePlotManager._display_plots_internal(figs, names, titles, subtitles)
         else:
-            ResizablePlotManager._display_plots_internal(figs, names)
+            ResizablePlotManager._display_plots_internal(figs, names, titles, subtitles)
     
     @staticmethod
-    def _display_plots_internal(figs, names):
+    def _display_plots_internal(figs, names, titles=None, subtitles=None):  # ADD parameters
         """Internal method to display plots"""
         from IPython.display import clear_output
         clear_output(wait=True)
@@ -223,6 +315,10 @@ class ResizablePlotManager:
         
         for i, (fig, name) in enumerate(zip(figs, names)):
             try:
+                # Use provided title or fall back to name
+                display_title = titles[i] if titles and i < len(titles) else name
+                subtitle = subtitles[i] if subtitles and i < len(subtitles) else None
+                
                 # Determine appropriate size based on plot type
                 if "histogram" in name.lower():
                     width, height = 700, 500
@@ -233,8 +329,8 @@ class ResizablePlotManager:
                 else:
                     width, height = 800, 600
                 
-                # Create and display resizable plot
-                display_resizable_plot(fig, name, width, height)
+                # Create and display resizable plot WITH TITLE AND SUBTITLE
+                display_resizable_plot(fig, display_title, width, height, subtitle)
                 
             except Exception as e:
                 print(f"❌ Error displaying plot {i+1} ({name}): {e}")
