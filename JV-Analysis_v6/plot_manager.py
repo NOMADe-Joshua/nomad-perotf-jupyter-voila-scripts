@@ -1397,32 +1397,43 @@ class PlotManager:
                     median_rev = rev_data[name_y].median()
                     mean_rev = rev_data[name_y].mean()
                     
+                    # Build custom hover text with all relevant info
+                    hover_texts = []
+                    for _, row in rev_data.iterrows():
+                        condition = row.get('condition', 'N/A')
+                        sample = row.get('sample', 'N/A')
+                        cell = row.get('cell', 'N/A')
+                        pce = row.get('PCE(%)', 'N/A')
+                        ff = row.get('FF(%)', 'N/A')
+                        jsc = row.get('Jsc(mA/cm2)', 'N/A')
+                        voc = row.get('Voc(V)', 'N/A')
+                        
+                        hover_text = (
+                            f"<b>Sample:</b> {sample} (Cell {cell})<br>"
+                            f"<b>Condition:</b> {condition}<br>"
+                            f"<b>Direction:</b> Reverse<br>"
+                            f"<b>PCE:</b> {pce:.2f}%<br>"
+                            f"<b>FF:</b> {ff:.2f}%<br>"
+                            f"<b>Jsc:</b> {jsc:.2f} mA/cm²<br>"
+                            f"<b>Voc:</b> {voc:.3f} V"
+                        )
+                        hover_texts.append(hover_text)
+                    
                     fig.add_trace(go.Box(
                         y=rev_data[name_y],
                         name=f"{key} [R]",
                         x=[x_left] * len(rev_data),
-                        marker=dict(
-                            color=base_color,
-                            opacity=1.0,
-                            size=4,
-                            line=dict(width=0)
-                        ),
-                        line=dict(color=base_color, width=2),
-                        fillcolor='rgba(255,255,255,0)',
-                        boxmean=False,
                         boxpoints='all',
                         pointpos=0,
                         jitter=0.5,
                         whiskerwidth=0.4,
-                        width=0.35,
-                        showlegend=False,
-                        hovertemplate=(
-                            f"<b>{key} [Reverse]</b><br>" +
-                            "Value: %{y:.3f}<br>" +
-                            f"Median: {median_rev:.3f}<br>" +
-                            f"Mean: {mean_rev:.3f}<br>" +
-                            f"Count: {count_rev}<extra></extra>"
-                        )
+                        marker=dict(size=5, opacity=0.7, color='rgba(0,0,0,0.7)'),
+                        line=dict(width=1.5, color='black'),
+                        fillcolor=base_color,
+                        boxmean=True,
+                        width=0.3,
+                        text=hover_texts,
+                        hovertemplate='%{text}<extra></extra>'
                     ))
                 
                 # FORWARD SCAN
@@ -1432,32 +1443,43 @@ class PlotManager:
                     median_fwd = fwd_data[name_y].median()
                     mean_fwd = fwd_data[name_y].mean()
                     
+                    # Build custom hover text
+                    hover_texts = []
+                    for _, row in fwd_data.iterrows():
+                        condition = row.get('condition', 'N/A')
+                        sample = row.get('sample', 'N/A')
+                        cell = row.get('cell', 'N/A')
+                        pce = row.get('PCE(%)', 'N/A')
+                        ff = row.get('FF(%)', 'N/A')
+                        jsc = row.get('Jsc(mA/cm2)', 'N/A')
+                        voc = row.get('Voc(V)', 'N/A')
+                        
+                        hover_text = (
+                            f"<b>Sample:</b> {sample} (Cell {cell})<br>"
+                            f"<b>Condition:</b> {condition}<br>"
+                            f"<b>Direction:</b> Forward<br>"
+                            f"<b>PCE:</b> {pce:.2f}%<br>"
+                            f"<b>FF:</b> {ff:.2f}%<br>"
+                            f"<b>Jsc:</b> {jsc:.2f} mA/cm²<br>"
+                            f"<b>Voc:</b> {voc:.3f} V"
+                        )
+                        hover_texts.append(hover_text)
+                    
                     fig.add_trace(go.Box(
                         y=fwd_data[name_y],
                         name=f"{key} [F]",
                         x=[x_right] * len(fwd_data),
-                        marker=dict(
-                            color=fwd_color,
-                            opacity=1.0,
-                            size=4,
-                            line=dict(width=0)
-                        ),
-                        line=dict(color=fwd_color, width=2),
-                        fillcolor='rgba(255,255,255,0)',
-                        boxmean=False,
                         boxpoints='all',
                         pointpos=0,
                         jitter=0.5,
                         whiskerwidth=0.4,
-                        width=0.35,
-                        showlegend=False,
-                        hovertemplate=(
-                            f"<b>{key} [Forward]</b><br>" +
-                            "Value: %{y:.3f}<br>" +
-                            f"Median: {median_fwd:.3f}<br>" +
-                            f"Mean: {mean_fwd:.3f}<br>" +
-                            f"Count: {count_fwd}<extra></extra>"
-                        )
+                        marker=dict(size=5, opacity=0.7, color='rgba(0,0,0,0.7)'),
+                        line=dict(width=1.5, color='black'),
+                        fillcolor=fwd_color,
+                        boxmean=True,
+                        width=0.3,
+                        text=hover_texts,
+                        hovertemplate='%{text}<extra></extra>'
                     ))
             
             # Update x-axis
@@ -1487,32 +1509,44 @@ class PlotManager:
                 median = group_data[name_y].median()
                 mean = group_data[name_y].mean()
                 
+                # Build custom hover text with all relevant info
+                hover_texts = []
+                for _, row in group_data.iterrows():
+                    condition = row.get('condition', 'N/A')
+                    sample = row.get('sample', 'N/A')
+                    cell = row.get('cell', 'N/A')
+                    direction = row.get('direction', 'N/A')
+                    pce = row.get('PCE(%)', 'N/A')
+                    ff = row.get('FF(%)', 'N/A')
+                    jsc = row.get('Jsc(mA/cm2)', 'N/A')
+                    voc = row.get('Voc(V)', 'N/A')
+                    
+                    hover_text = (
+                        f"<b>Sample:</b> {sample} (Cell {cell})<br>"
+                        f"<b>Condition:</b> {condition}<br>"
+                        f"<b>Direction:</b> {direction}<br>"
+                        f"<b>PCE:</b> {pce:.2f}%<br>"
+                        f"<b>FF:</b> {ff:.2f}%<br>"
+                        f"<b>Jsc:</b> {jsc:.2f} mA/cm²<br>"
+                        f"<b>Voc:</b> {voc:.3f} V"
+                    )
+                    hover_texts.append(hover_text)
+                
                 fig.add_trace(go.Box(
                     y=group_data[name_y],
                     name=str(key),
                     x=[str(key)] * len(group_data),
-                    marker=dict(
-                        color=color,
-                        opacity=1.0,
-                        size=4,
-                        line=dict(width=0)
-                    ),
-                    line=dict(color=color, width=2),
-                    fillcolor='rgba(255,255,255,0)',
-                    boxmean=False,
                     boxpoints='all',
                     pointpos=0,
                     jitter=0.5,
                     whiskerwidth=0.4,
+                    marker=dict(size=5, opacity=0.7, color='rgba(0,0,0,0.7)'),
+                    line=dict(width=1.5, color='black'),
+                    fillcolor=color,
+                    boxmean=True,
                     width=0.8,
-                    showlegend=False,
-                    hovertemplate=(
-                        f"<b>{key}</b><br>" +
-                        "Value: %{y:.3f}<br>" +
-                        f"Median: {median:.3f}<br>" +
-                        f"Mean: {mean:.3f}<br>" +
-                        f"Count: {count}<extra></extra>"
-                    )
+                    text=hover_texts,
+                    hovertemplate='%{text}<extra></extra>'
                 ))
             
             fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
