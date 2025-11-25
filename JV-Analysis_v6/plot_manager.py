@@ -82,7 +82,28 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
         fig_name = None
 
         try:
-            if "csg" in pl and var_y:
+            # NEW: Handle combined boxplot grid (all 4 parameters)
+            if "Ball" in pl and var_x:
+                # COMBINED GRID BOXPLOT: Only 2 return values!
+                fig, fig_name = plot_manager.create_combined_boxplot_grid(
+                    filtered_jv, var_x,
+                    [omitted_jv, filter_pars],
+                    "data", colors=color_scheme,
+                    separate_scan_dir=separate_scan_dir
+                )
+                # Don't continue - let it fall through to append at end
+                
+            elif "Jall" in pl and var_x:
+                # OMITTED COMBINED GRID BOXPLOT: Only 2 return values!
+                fig, fig_name = plot_manager.create_combined_boxplot_grid(
+                    omitted_jv, var_x,
+                    [filtered_jv, filter_pars],
+                    "junk", colors=color_scheme,
+                    separate_scan_dir=separate_scan_dir
+                )
+                # Don't continue - let it fall through to append at end
+                
+            elif "csg" in pl and var_y:
                 # Direction, Status and Variable combination plots
                 figs, fig_names_combo = plot_manager.create_triple_combination_plots(
                     filtered_jv, var_y, 'csg', [omitted_jv, filter_pars], colors=color_scheme
@@ -162,7 +183,7 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
             elif "H" in pl and var_y:
                 fig, fig_name = plot_manager.create_histogram(filtered_jv, var_y)
                 # Don't continue - let it fall through to append at end
-                    
+                   
             elif "Cb" in pl:
                 fig, fig_name = plot_manager.create_jv_best_per_condition_plot(filtered_jv, filtered_curves, colors=color_scheme)
             elif "Cw" in pl:
@@ -231,17 +252,38 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
 
 def plot_list_from_voila(plot_list):
     """Convert plot selections from UI to plot codes"""
-    jvc_dict = {'Voc': 'v', 'Jsc': 'j', 'FF': 'f', 'PCE': 'p', 'R_ser': 'r', 'R_shu': 'h', 'V_mpp': 'u', 'J_mpp': 'i', 'P_mpp': 'm'}
-    box_dict = {'by Batch': 'e', 'by Variable': 'g', 'by Sample': 'a', 'by Cell': 'b', 'by Scan Direction': 'c',
-                'by Status': 's', 'by Status and Variable': 'sg', 'by Direction and Variable': 'cg', 'by Cell and Variable': 'bg',
-                'by Direction, Status and Variable': 'csg'}
+    jvc_dict = {
+        'Voc': 'v', 
+        'Jsc': 'j', 
+        'FF': 'f', 
+        'PCE': 'p', 
+        'R_ser': 'r', 
+        'R_shu': 'h', 
+        'V_mpp': 'u', 
+        'J_mpp': 'i', 
+        'P_mpp': 'm', 
+        'all': 'all'  # Maps to combined grid boxplot
+    }
+    
+    box_dict = {
+        'by Batch': 'e', 
+        'by Variable': 'g', 
+        'by Sample': 'a', 
+        'by Cell': 'b', 
+        'by Scan Direction': 'c',
+        'by Status': 's', 
+        'by Status and Variable': 'sg', 
+        'by Direction and Variable': 'cg', 
+        'by Cell and Variable': 'bg',
+        'by Direction, Status and Variable': 'csg'
+    }
 
     cur_dict = {
         'All cells': 'Cy', 
         'Only working cells': 'Cz', 
         'Rejected cells': 'Co', 
         'Best device only': 'Cw', 
-        'Best device per condition': 'Cb',  # ADD this line
+        'Best device per condition': 'Cb',
         'Separated by cell (all)': 'Cx',
         'Separated by cell (working only)': 'Cxw',
         'Separated by substrate (all)': 'Cd',
@@ -255,12 +297,24 @@ def plot_list_from_voila(plot_list):
         
         if "omitted" in plot_type:
             code += "J"
-            code += jvc_dict.get(option1, '')
-            code += box_dict.get(option2, '')
+            param_code = jvc_dict.get(option1, '')
+            code += param_code
+            # Only add box_dict code if NOT "all" parameter
+            if param_code != 'all':
+                code += box_dict.get(option2, '')
+            else:
+                # For "all", we need the x-axis variable
+                code += box_dict.get(option2, '')
         elif "Boxplot" in plot_type:
             code += "B"
-            code += jvc_dict.get(option1, '')
-            code += box_dict.get(option2, '')
+            param_code = jvc_dict.get(option1, '')
+            code += param_code
+            # Only add box_dict code if NOT "all" parameter
+            if param_code != 'all':
+                code += box_dict.get(option2, '')
+            else:
+                # For "all", we need the x-axis variable
+                code += box_dict.get(option2, '')
         elif "Histogram" in plot_type:
             code += "H"
             code += jvc_dict.get(option1, '')
@@ -1208,6 +1262,580 @@ class PlotManager:
         
         return fig_list, fig_names
 
+    def create_combined_boxplot_grid(self, data, var_x, other_data, data_type="data", colors=None, separate_scan_dir=False):
+        """
+        Create a 2x2 grid of boxplots showing PCE, FF, Jsc, and Voc together.
+        var_x should be the GROUPING variable (e.g., 'condition' for "by Variable")
+        """
+        from plotly.subplots import make_subplots
+        
+        var_x_map = {
+            'sample': 'sample', 'cell': 'cell', 'direction': 'direction',
+            'ilum': 'ilum', 'batch': 'batch_for_plotting', 'condition': 'condition',
+            'status': 'status'
+        }
+        
+        name_x = var_x_map.get(var_x, var_x)
+        
+        if name_x not in data.columns:
+            print(f"⚠️ Warning: Column {name_x} not found in data")
+            return None, ""
+        
+        # CRITICAL FIX: Define all 4 parameters to plot
+        parameters = [
+            {'name': 'PCE(%)', 'title': 'PCE', 'unit': '%'},
+            {'name': 'FF(%)', 'title': 'Fill Factor', 'unit': '%'},
+            {'name': 'Jsc(mA/cm2)', 'title': 'J<sub>sc</sub>', 'unit': 'mA/cm²'},
+            {'name': 'Voc(V)', 'title': 'V<sub>oc</sub>', 'unit': 'V'}
+        ]
+        
+        # CRITICAL FIX: Create subplot with proper y-axis titles
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=[p['title'] for p in parameters],  # ADD subplot titles
+            vertical_spacing=0.12,  # Increased for y-axis labels
+            horizontal_spacing=0.10,
+            specs=[[{"type": "box"}, {"type": "box"}],
+                   [{"type": "box"}, {"type": "box"}]]
+        )
+        
+        group_keys = sorted(data[name_x].unique())
+        num_categories = len(group_keys)
+        
+        if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
+            distributed_colors = self._get_intelligent_colors(
+                group_keys, num_categories * 2, color_scheme=colors
+            )
+        else:
+            distributed_colors = self._get_intelligent_colors(
+                group_keys, num_categories, color_scheme=colors
+            )
+        
+        positions_map = [(1, 1), (1, 2), (2, 1), (2, 2)]
+        
+        for param_idx, param in enumerate(parameters):
+            row, col = positions_map[param_idx]
+            param_name = param['name']
+            
+            if param_name not in data.columns:
+                print(f"⚠️ Warning: Parameter {param_name} not found in data")
+                continue
+            
+            # SEPARATE BY SCAN DIRECTION
+            if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
+                for i, key in enumerate(group_keys):
+                    group_data = data[data[name_x] == key]
+                    
+                    base_color = distributed_colors[i * 2]
+                    fwd_color = distributed_colors[i * 2 + 1]
+                    
+                    x_center = i
+                    x_left = x_center - 0.2
+                    x_right = x_center + 0.2
+                    
+                    # REVERSE SCAN
+                    rev_data = group_data[group_data['direction'] == 'Reverse']
+                    if not rev_data.empty:
+                        fig.add_trace(go.Box(
+                            y=rev_data[param_name],
+                            name=f"{key} [R]" if param_idx == 0 else "",
+                            x=[x_left] * len(rev_data),
+                            boxpoints='all',
+                            pointpos=0,
+                            jitter=0.5,
+                            whiskerwidth=0.4,
+                            marker=dict(size=4, opacity=0.7, color='rgba(0,0,0,0.7)'),
+                            line=dict(width=1.5, color='black'),
+                            fillcolor=base_color,
+                            boxmean=True,
+                            width=0.3,
+                            legendgroup=f"{key}_R",
+                            showlegend=(param_idx == 0)
+                        ), row=row, col=col)
+                    
+                    # FORWARD SCAN
+                    fwd_data = group_data[group_data['direction'] == 'Forward']
+                    if not fwd_data.empty:
+                        fig.add_trace(go.Box(
+                            y=fwd_data[param_name],
+                            name=f"{key} [F]" if param_idx == 0 else "",
+                            x=[x_right] * len(fwd_data),
+                            boxpoints='all',
+                            pointpos=0,
+                            jitter=0.5,
+                            whiskerwidth=0.4,
+                            marker=dict(size=4, opacity=0.7, color='rgba(0,0,0,0.7)'),
+                            line=dict(width=1.5, color='black'),
+                            fillcolor=fwd_color,
+                            boxmean=True,
+                            width=0.3,
+                            legendgroup=f"{key}_F",
+                            showlegend=(param_idx == 0)
+                        ), row=row, col=col)
+                
+                fig.update_xaxes(
+                    tickmode='array',
+                    tickvals=list(range(len(group_keys))),
+                    ticktext=list(group_keys) if row == 2 else [""] * len(group_keys),
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='lightgray',
+                    row=row, col=col
+                )
+            
+            else:
+                # STANDARD: One box per group
+                if name_x == 'direction' and set(data[name_x].unique()) == {'Forward', 'Reverse'}:
+                    group_keys_param = ['Reverse', 'Forward']
+                else:
+                    group_keys_param = group_keys
+                
+                for i, key in enumerate(group_keys_param):
+                    group_data = data[data[name_x] == key]
+                    if group_data.empty:
+                        continue
+                    
+                    color = distributed_colors[i]
+                    
+                    fig.add_trace(go.Box(
+                        y=group_data[param_name],
+                        name=str(key) if param_idx == 0 else "",
+                        x=[str(key)] * len(group_data),
+                        boxpoints='all',
+                        pointpos=0,
+                        jitter=0.5,
+                        whiskerwidth=0.4,
+                        marker=dict(size=4, opacity=0.7, color='rgba(0,0,0,0.7)'),
+                        line=dict(width=1.5, color='black'),
+                        fillcolor=color,
+                        boxmean=True,
+                        width=0.8,
+                        legendgroup=str(key),
+                        showlegend=(param_idx == 0)
+                    ), row=row, col=col)
+                
+                fig.update_xaxes(
+                    ticktext=list(group_keys_param) if row == 2 else [""] * len(group_keys_param),
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='lightgray',
+                    row=row, col=col
+                )
+            
+            # CRITICAL FIX: Add proper y-axis labels with units
+            y_axis_label = f"{param['title']} ({param['unit']})"
+            
+            fig.update_yaxes(
+                title_text=y_axis_label,  # NOW has proper label!
+                title_standoff=5,  # Space between axis and label
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='lightgray',
+                row=row, col=col
+            )
+        
+        # CRITICAL FIX: Better main title
+        x_axis_display = name_x.replace('_', ' ').title()
+        if name_x == 'condition':
+            x_axis_display = 'Variable'
+        elif name_x == 'batch_for_plotting':
+            x_axis_display = 'Batch'
+        
+        title_text = f"Combined Performance Metrics by {x_axis_display}"
+        if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
+            title_text += " (Reverse/Forward split)"
+        if data_type == "junk":
+            title_text += " (Filtered Out Data)"
+        
+        fig.update_layout(
+            title=dict(
+                text=title_text,
+                x=0.5,
+                xanchor='center',
+                font=dict(size=16, color='black')
+            ),
+            template="plotly_white",
+            showlegend=True,
+            legend=dict(
+                x=1.02, y=1,
+                xanchor="left", yanchor="top",
+                bgcolor="rgba(255,255,255,0.9)",
+                bordercolor="black", borderwidth=1
+            ),
+            height=700,
+            margin=dict(l=80, r=200, t=100, b=80),  # Increased top margin for subplot titles
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            hovermode='closest'
+        )
+        
+        # X-axis angle for many categories
+        if not separate_scan_dir and len(group_keys) > 4:
+            fig.update_xaxes(tickangle=-45, row=2, col=1)
+            fig.update_xaxes(tickangle=-45, row=2, col=2)
+        
+        fig_name = f"Boxplot_Combined_by_{name_x}"
+        if separate_scan_dir:
+            fig_name += "_separated"
+        if data_type == "junk":
+            fig_name += "_filtered_out"
+        fig_name += ".html"
+        
+        return fig, fig_name
+
+    def create_boxplot(self, data, var_x, var_y, other_data, data_type="data", colors=None, separate_scan_dir=False):
+        """Create normal single-parameter boxplot - COMPLETELY RESTORED"""
+        var_y_map = {
+            'voc': 'Voc(V)', 'jsc': 'Jsc(mA/cm2)', 'ff': 'FF(%)', 'pce': 'PCE(%)',
+            'vmpp': 'V_mpp(V)', 'jmpp': 'J_mpp(mA/cm2)', 'pmpp': 'P_mpp(mW/cm2)',
+            'rser': 'R_series(Ohmcm2)', 'rshu': 'R_shunt(Ohmcm2)'
+        }
+        var_x_map = {
+            'sample': 'sample', 'cell': 'cell', 'direction': 'direction',
+            'ilum': 'ilum', 'batch': 'batch_for_plotting', 'condition': 'condition',
+            'status': 'status'
+        }
+        
+        name_y = var_y_map.get(var_y, var_y)
+        name_x = var_x_map.get(var_x, var_x)
+        
+        if name_y not in data.columns or name_x not in data.columns:
+            print(f"⚠️ Warning: Column {name_y} or {name_x} not found")
+            return None, "", None, "", ""
+
+        fig = go.Figure()
+        
+        group_keys = sorted(data[name_x].unique())
+        num_categories = len(group_keys)
+        
+        if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
+            distributed_colors = self._get_intelligent_colors(
+                group_keys, num_categories * 2, color_scheme=colors
+            )
+        else:
+            distributed_colors = self._get_intelligent_colors(
+                group_keys, num_categories, color_scheme=colors
+            )
+        
+        # SEPARATE BY SCAN DIRECTION
+        if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
+            for i, key in enumerate(group_keys):
+                group_data = data[data[name_x] == key]
+                
+                base_color = distributed_colors[i * 2]
+                fwd_color = distributed_colors[i * 2 + 1]
+                
+                x_center = i
+                x_left = x_center - 0.2
+                x_right = x_center + 0.2
+                
+                # REVERSE
+                rev_data = group_data[group_data['direction'] == 'Reverse']
+                if not rev_data.empty:
+                    hover_texts = []
+                    for _, row in rev_data.iterrows():
+                        hover_text = (
+                            f"<b>Sample:</b> {row.get('sample', 'N/A')} (Cell {row.get('cell', 'N/A')})<br>"
+                            f"<b>Condition:</b> {row.get('condition', 'N/A')}<br>"
+                            f"<b>Direction:</b> Reverse<br>"
+                            f"<b>PCE:</b> {row.get('PCE(%)', 0):.2f}%<br>"
+                            f"<b>FF:</b> {row.get('FF(%)', 0):.2f}%<br>"
+                            f"<b>Jsc:</b> {row.get('Jsc(mA/cm2)', 0):.2f} mA/cm²<br>"
+                            f"<b>Voc:</b> {row.get('Voc(V)', 0):.3f} V"
+                        )
+                        hover_texts.append(hover_text)
+                    
+                    fig.add_trace(go.Box(
+                        y=rev_data[name_y],
+                        name=f"{key} [R]",
+                        x=[x_left] * len(rev_data),
+                        boxpoints='all',
+                        pointpos=0,
+                        jitter=0.5,
+                        whiskerwidth=0.4,
+                        marker=dict(size=5, opacity=0.7, color='rgba(0,0,0,0.7)'),
+                        line=dict(width=1.5, color='black'),
+                        fillcolor=base_color,
+                        boxmean=True,
+                        width=0.3,
+                        text=hover_texts,
+                        hovertemplate='%{text}<extra></extra>'
+                    ))
+                
+                # FORWARD
+                fwd_data = group_data[group_data['direction'] == 'Forward']
+                if not fwd_data.empty:
+                    hover_texts = []
+                    for _, row in fwd_data.iterrows():
+                        hover_text = (
+                            f"<b>Sample:</b> {row.get('sample', 'N/A')} (Cell {row.get('cell', 'N/A')})<br>"
+                            f"<b>Condition:</b> {row.get('condition', 'N/A')}<br>"
+                            f"<b>Direction:</b> Forward<br>"
+                            f"<b>PCE:</b> {row.get('PCE(%)', 0):.2f}%<br>"
+                            f"<b>FF:</b> {row.get('FF(%)', 0):.2f}%<br>"
+                            f"<b>Jsc:</b> {row.get('Jsc(mA/cm2)', 0):.2f} mA/cm²<br>"
+                            f"<b>Voc:</b> {row.get('Voc(V)', 0):.3f} V"
+                        )
+                        hover_texts.append(hover_text)
+                    
+                    fig.add_trace(go.Box(
+                        y=fwd_data[name_y],
+                        name=f"{key} [F]",
+                        x=[x_right] * len(fwd_data),
+                        boxpoints='all',
+                        pointpos=0,
+                        jitter=0.5,
+                        whiskerwidth=0.4,
+                        marker=dict(size=5, opacity=0.7, color='rgba(0,0,0,0.7)'),
+                        line=dict(width=1.5, color='black'),
+                        fillcolor=fwd_color,
+                        boxmean=True,
+                        width=0.3,
+                        text=hover_texts,
+                        hovertemplate='%{text}<extra></extra>'
+                    ))
+            
+            fig.update_xaxes(
+                tickmode='array',
+                tickvals=list(range(len(group_keys))),
+                ticktext=list(group_keys),
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='lightgray'
+            )
+        else:
+            # STANDARD
+            if name_x == 'direction' and set(data[name_x].unique()) == {'Forward', 'Reverse'}:
+                group_keys = ['Reverse', 'Forward']
+            
+            for i, key in enumerate(group_keys):
+                group_data = data[data[name_x] == key]
+                if group_data.empty:
+                    continue
+                
+                color = distributed_colors[i]
+                
+                hover_texts = []
+                for _, row in group_data.iterrows():
+                    hover_text = (
+                        f"<b>Sample:</b> {row.get('sample', 'N/A')} (Cell {row.get('cell', 'N/A')})<br>"
+                        f"<b>Condition:</b> {row.get('condition', 'N/A')}<br>"
+                        f"<b>Direction:</b> {row.get('direction', 'N/A')}<br>"
+                        f"<b>PCE:</b> {row.get('PCE(%)', 0):.2f}%<br>"
+                        f"<b>FF:</b> {row.get('FF(%)', 0):.2f}%<br>"
+                        f"<b>Jsc:</b> {row.get('Jsc(mA/cm2)', 0):.2f} mA/cm²<br>"
+                        f"<b>Voc:</b> {row.get('Voc(V)', 0):.3f} V"
+                    )
+                    hover_texts.append(hover_text)
+                
+                fig.add_trace(go.Box(
+                    y=group_data[name_y],
+                    name=str(key),
+                    x=[str(key)] * len(group_data),
+                    boxpoints='all',
+                    pointpos=0,
+                    jitter=0.5,
+                    whiskerwidth=0.4,
+                    marker=dict(size=5, opacity=0.7, color='rgba(0,0,0,0.7)'),
+                    line=dict(width=1.5, color='black'),
+                    fillcolor=color,
+                    boxmean=True,
+                    width=0.8,
+                    text=hover_texts,
+                    hovertemplate='%{text}<extra></extra>'
+                ))
+            
+            fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+        
+        # Statistics
+        stats_df = data.groupby(name_x)[name_y].agg(['mean', 'std', 'min', 'max', 'count'])
+        
+        title_text = f"{name_y} by {name_x}"
+        if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
+            title_text += " (Reverse/Forward split)"
+        if data_type == "junk":
+            title_text += " (Filtered Out Data)"
+        
+        subtitle = f"Data from {len(data)} measurements"
+        if name_x in data.columns:
+            num_groups = data[name_x].nunique()
+            subtitle += f" across {num_groups} {name_x} groups"
+        
+        fig.update_layout(
+            title=title_text,
+            xaxis_title=name_x.replace('_', ' ').title(),
+            yaxis_title=name_y,
+            template="plotly_white",
+            showlegend=False,
+            hovermode='closest',
+            margin=dict(l=40, r=40, t=100, b=80),
+            plot_bgcolor='white',
+            paper_bgcolor='white'
+        )
+        
+        if not separate_scan_dir and len(data[name_x].unique()) > 4:
+            fig.update_layout(xaxis=dict(tickangle=-45, tickfont=dict(size=10)))
+        
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+        
+        fig_name = f"Boxplot_{name_y}_by_{name_x}"
+        if separate_scan_dir:
+            fig_name += "_separated"
+        if data_type == "junk":
+            fig_name += "_filtered_out"
+        fig_name += ".html"
+        
+        return fig, fig_name, None, title_text, subtitle
+
+    def create_histogram(self, data, var_y):
+        """Create histogram for a given parameter"""
+        var_y_map = {
+            'voc': 'Voc(V)', 'jsc': 'Jsc(mA/cm2)', 'ff': 'FF(%)', 'pce': 'PCE(%)',
+            'vmpp': 'V_mpp(V)', 'jmpp': 'J_mpp(mA/cm2)', 'pmpp': 'P_mpp(mW/cm2)',
+            'rser': 'R_series(Ohmcm2)', 'rshu': 'R_shunt(Ohmcm2)'
+        }
+        
+        name_y = var_y_map.get(var_y, var_y)
+        
+        if name_y not in data.columns:
+            print(f"⚠️ Warning: Column {name_y} not found in data")
+            return None, ""
+        
+        fig = go.Figure()
+        
+        fig.add_trace(go.Histogram(
+            x=data[name_y],
+            nbinsx=30,
+            marker=dict(
+                color='rgba(93, 164, 214, 0.7)',
+                line=dict(color='black', width=1)
+            ),
+            name=name_y
+        ))
+        
+        fig.update_layout(
+            title=f"Distribution of {name_y}",
+            xaxis_title=name_y,
+            yaxis_title='Frequency',
+            template="plotly_white",
+            showlegend=False,
+            margin=dict(l=40, r=40, t=80, b=60)
+        )
+        
+        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+        
+        fig_name = f"Histogram_{name_y}.html"
+        
+        return fig, fig_name
+    
+    def create_jv_all_cells_plot(self, jvc_data, curves_data, colors=None):
+        """Plot JV curves for all cells"""
+        # Simple implementation - plot first 50 measurements
+        return self._create_jv_subset_plot(jvc_data, curves_data, colors, "All Cells", max_curves=50)
+    
+    def create_jv_working_cells_plot(self, jvc_data, curves_data, colors=None):
+        """Plot JV curves for working cells only"""
+        return self._create_jv_subset_plot(jvc_data, curves_data, colors, "Working Cells", max_curves=50)
+    
+    def create_jv_non_working_cells_plot(self, jvc_data, curves_data, colors=None):
+        """Plot JV curves for non-working (rejected) cells"""
+        return self._create_jv_subset_plot(jvc_data, curves_data, colors, "Rejected Cells", max_curves=50)
+    
+    def _create_jv_subset_plot(self, jvc_data, curves_data, colors, title_suffix, max_curves=50):
+        """Helper to create JV curve plots for a subset of data"""
+        if jvc_data.empty or curves_data.empty:
+            fig = go.Figure()
+            fig.update_layout(title=f"No data available for {title_suffix}")
+            return fig, f"JV_{title_suffix.replace(' ', '_')}.html"
+        
+        if colors is None:
+            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
+        
+        fig = go.Figure()
+        
+        # Add axis lines
+        fig.add_shape(type="line", x0=-0.2, y0=0, x1=1.5, y1=0, line=dict(color="gray", width=2))
+        fig.add_shape(type="line", x0=0, y0=-30, x1=0, y1=5, line=dict(color="gray", width=2))
+        
+        # Get unique sample-cell combinations (limited to max_curves)
+        unique_devices = jvc_data.groupby(['sample', 'cell']).size().reset_index()
+        unique_devices = unique_devices.head(max_curves)
+        
+        for i, (_, device_row) in enumerate(unique_devices.iterrows()):
+            sample = device_row['sample']
+            cell = device_row['cell']
+            
+            # Get curves for this device
+            device_curves = curves_data[
+                (curves_data['sample'] == sample) & 
+                (curves_data['cell'] == cell)
+            ]
+            
+            if device_curves.empty:
+                continue
+            
+            # Process voltage and current data
+            voltage_data = device_curves[device_curves['variable'] == 'Voltage (V)']
+            current_data = device_curves[device_curves['variable'] == 'Current Density(mA/cm2)']
+            
+            if not voltage_data.empty and not current_data.empty:
+                # Take first measurement for each device
+                v_row = voltage_data.iloc[0]
+                c_row = current_data.iloc[0]
+                
+                voltage_values = []
+                current_values = []
+                
+                for col in v_row.index[8:]:
+                    try:
+                        v_val = float(v_row[col])
+                        c_val = float(c_row[col])
+                        if not pd.isna(v_val) and not pd.isna(c_val):
+                            voltage_values.append(v_val)
+                            current_values.append(c_val)
+                    except (ValueError, TypeError):
+                        continue
+                
+                if len(voltage_values) > 0:
+                    color = colors[i % len(colors)]
+                    
+                    fig.add_trace(go.Scatter(
+                        x=voltage_values,
+                        y=current_values,
+                        mode='lines',
+                        line=dict(color=color, width=1),
+                        name=f"{sample}_{cell}",
+                        showlegend=False
+                    ))
+        
+        fig.update_layout(
+            title=f"JV Curves - {title_suffix}",
+            xaxis_title='Voltage [V]',
+            yaxis_title='Current Density [mA/cm²]',
+            xaxis=dict(range=[-0.2, 1.5]),
+            yaxis=dict(range=[-30, 5]),
+            template="plotly_white",
+            margin=dict(l=80, r=50, t=80, b=80)
+        )
+        
+        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+        
+        return fig, f"JV_{title_suffix.replace(' ', '_')}.html"
+    
+    def create_combination_plots(self, data, var_y, combination_type, other_data, colors=None):
+        """Create combination plots (e.g., by Status and Variable)"""
+        # Placeholder - returns empty lists
+        print(f"Combination plot '{combination_type}' not yet implemented")
+        return [], []
+    
+    def create_triple_combination_plots(self, data, var_y, combination_type, other_data, colors=None):
+        """Create triple combination plots"""
+        # Placeholder - returns empty lists
+        print(f"Triple combination plot '{combination_type}' not yet implemented")
+        return [], []
+    
     def _get_intelligent_colors(self, categories, num_colors_needed=None, color_scheme=None):
         """
         Intelligent color assignment using selected color scheme:
@@ -1318,281 +1946,3 @@ class PlotManager:
             return separated_colors
         
         return base_colors
-
-    def create_boxplot(self, data, var_x, var_y, other_data, data_type="data", colors=None, separate_scan_dir=False):
-        """
-        Create boxplot with intelligent color system:
-        - Uses selected color scheme for ALL categories
-        - Interpolates colors when needed (no repetition!)
-        - HOLLOW boxes (only outlines visible)
-        - Reverse/Forward differentiation with transparency
-        """
-        var_y_map = {
-            'voc': 'Voc(V)', 'jsc': 'Jsc(mA/cm2)', 'ff': 'FF(%)', 'pce': 'PCE(%)',
-            'vmpp': 'V_mpp(V)', 'jmpp': 'J_mpp(mA/cm2)', 'pmpp': 'P_mpp(mW/cm2)',
-            'rser': 'R_series(Ohmcm2)', 'rshu': 'R_shunt(Ohmcm2)'
-        }
-        var_x_map = {
-            'sample': 'sample', 'cell': 'cell', 'direction': 'direction',
-            'ilum': 'ilum', 'batch': 'batch_for_plotting', 'condition': 'condition',
-            'status': 'status'
-        }
-        
-        name_y = var_y_map.get(var_y, var_y)
-        name_x = var_x_map.get(var_x, var_x)
-        
-        if name_y not in data.columns or name_x not in data.columns:
-            print(f"⚠️ Warning: Column {name_y} or {name_x} not found in data")
-            print(f"   Available columns: {list(data.columns)}")
-            return None, "", None, "", ""
-
-        fig = go.Figure()
-        
-        # Get all unique categories
-        group_keys = sorted(data[name_x].unique())
-        num_categories = len(group_keys)
-        
-        # INTELLIGENT COLOR ASSIGNMENT - ALWAYS use provided color scheme
-        if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
-            # Need colors for Reverse/Forward pairs
-            distributed_colors = self._get_intelligent_colors(
-                group_keys, 
-                num_categories * 2,
-                color_scheme=colors  # PASS the selected color scheme
-            )
-        else:
-            # Just one color per category
-            distributed_colors = self._get_intelligent_colors(
-                group_keys, 
-                num_categories,
-                color_scheme=colors  # PASS the selected color scheme
-            )
-        
-        print(f"🎨 Color distribution for {num_categories} categories:")
-        print(f"   Color scheme has {len(colors) if colors else 0} colors")
-        print(f"   Generated {len(distributed_colors)} interpolated colors")
-        if num_categories <= 5:
-            print(f"   Categories: {group_keys}")
-        else:
-            print(f"   First 5 categories: {group_keys[:5]}...")
-        
-        # SEPARATE BY SCAN DIRECTION
-        if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
-            for i, key in enumerate(group_keys):
-                group_data = data[data[name_x] == key]
-                
-                # Get colors for this category (Reverse and Forward)
-                base_color = distributed_colors[i * 2]      # Reverse (full opacity)
-                fwd_color = distributed_colors[i * 2 + 1]  # Forward (reduced opacity)
-                
-                # Calculate X positions
-                x_center = i
-                x_left = x_center - 0.2   # Reverse left
-                x_right = x_center + 0.2  # Forward right
-                
-                # REVERSE SCAN
-                rev_data = group_data[group_data['direction'] == 'Reverse']
-                if not rev_data.empty:
-                    count_rev = len(rev_data)
-                    median_rev = rev_data[name_y].median()
-                    mean_rev = rev_data[name_y].mean()
-                    
-                    # Build custom hover text with all relevant info
-                    hover_texts = []
-                    for _, row in rev_data.iterrows():
-                        condition = row.get('condition', 'N/A')
-                        sample = row.get('sample', 'N/A')
-                        cell = row.get('cell', 'N/A')
-                        pce = row.get('PCE(%)', 'N/A')
-                        ff = row.get('FF(%)', 'N/A')
-                        jsc = row.get('Jsc(mA/cm2)', 'N/A')
-                        voc = row.get('Voc(V)', 'N/A')
-                        
-                        hover_text = (
-                            f"<b>Sample:</b> {sample} (Cell {cell})<br>"
-                            f"<b>Condition:</b> {condition}<br>"
-                            f"<b>Direction:</b> Reverse<br>"
-                            f"<b>PCE:</b> {pce:.2f}%<br>"
-                            f"<b>FF:</b> {ff:.2f}%<br>"
-                            f"<b>Jsc:</b> {jsc:.2f} mA/cm²<br>"
-                            f"<b>Voc:</b> {voc:.3f} V"
-                        )
-                        hover_texts.append(hover_text)
-                    
-                    fig.add_trace(go.Box(
-                        y=rev_data[name_y],
-                        name=f"{key} [R]",
-                        x=[x_left] * len(rev_data),
-                        boxpoints='all',
-                        pointpos=0,
-                        jitter=0.5,
-                        whiskerwidth=0.4,
-                        marker=dict(size=5, opacity=0.7, color='rgba(0,0,0,0.7)'),
-                        line=dict(width=1.5, color='black'),
-                        fillcolor=base_color,
-                        boxmean=True,
-                        width=0.3,
-                        text=hover_texts,
-                        hovertemplate='%{text}<extra></extra>'
-                    ))
-                
-                # FORWARD SCAN
-                fwd_data = group_data[group_data['direction'] == 'Forward']
-                if not fwd_data.empty:
-                    count_fwd = len(fwd_data)
-                    median_fwd = fwd_data[name_y].median()
-                    mean_fwd = fwd_data[name_y].mean()
-                    
-                    # Build custom hover text
-                    hover_texts = []
-                    for _, row in fwd_data.iterrows():
-                        condition = row.get('condition', 'N/A')
-                        sample = row.get('sample', 'N/A')
-                        cell = row.get('cell', 'N/A')
-                        pce = row.get('PCE(%)', 'N/A')
-                        ff = row.get('FF(%)', 'N/A')
-                        jsc = row.get('Jsc(mA/cm2)', 'N/A')
-                        voc = row.get('Voc(V)', 'N/A')
-                        
-                        hover_text = (
-                            f"<b>Sample:</b> {sample} (Cell {cell})<br>"
-                            f"<b>Condition:</b> {condition}<br>"
-                            f"<b>Direction:</b> Forward<br>"
-                            f"<b>PCE:</b> {pce:.2f}%<br>"
-                            f"<b>FF:</b> {ff:.2f}%<br>"
-                            f"<b>Jsc:</b> {jsc:.2f} mA/cm²<br>"
-                            f"<b>Voc:</b> {voc:.3f} V"
-                        )
-                        hover_texts.append(hover_text)
-                    
-                    fig.add_trace(go.Box(
-                        y=fwd_data[name_y],
-                        name=f"{key} [F]",
-                        x=[x_right] * len(fwd_data),
-                        boxpoints='all',
-                        pointpos=0,
-                        jitter=0.5,
-                        whiskerwidth=0.4,
-                        marker=dict(size=5, opacity=0.7, color='rgba(0,0,0,0.7)'),
-                        line=dict(width=1.5, color='black'),
-                        fillcolor=fwd_color,
-                        boxmean=True,
-                        width=0.3,
-                        text=hover_texts,
-                        hovertemplate='%{text}<extra></extra>'
-                    ))
-            
-            # Update x-axis
-            fig.update_xaxes(
-                tickmode='array',
-                tickvals=list(range(len(group_keys))),
-                ticktext=list(group_keys),
-                showgrid=True,
-                gridwidth=1,
-                gridcolor='lightgray'
-            )
-        
-        else:
-            # STANDARD: One box per group
-            if name_x == 'direction' and set(data[name_x].unique()) == {'Forward', 'Reverse'}:
-                group_keys = ['Reverse', 'Forward']
-            else:
-                group_keys = sorted(data[name_x].unique())
-            
-            for i, key in enumerate(group_keys):
-                group_data = data[data[name_x] == key]
-                if group_data.empty:
-                    continue
-                    
-                color = distributed_colors[i]
-                count = len(group_data)
-                median = group_data[name_y].median()
-                mean = group_data[name_y].mean()
-                
-                # Build custom hover text with all relevant info
-                hover_texts = []
-                for _, row in group_data.iterrows():
-                    condition = row.get('condition', 'N/A')
-                    sample = row.get('sample', 'N/A')
-                    cell = row.get('cell', 'N/A')
-                    direction = row.get('direction', 'N/A')
-                    pce = row.get('PCE(%)', 'N/A')
-                    ff = row.get('FF(%)', 'N/A')
-                    jsc = row.get('Jsc(mA/cm2)', 'N/A')
-                    voc = row.get('Voc(V)', 'N/A')
-                    
-                    hover_text = (
-                        f"<b>Sample:</b> {sample} (Cell {cell})<br>"
-                        f"<b>Condition:</b> {condition}<br>"
-                        f"<b>Direction:</b> {direction}<br>"
-                        f"<b>PCE:</b> {pce:.2f}%<br>"
-                        f"<b>FF:</b> {ff:.2f}%<br>"
-                        f"<b>Jsc:</b> {jsc:.2f} mA/cm²<br>"
-                        f"<b>Voc:</b> {voc:.3f} V"
-                    )
-                    hover_texts.append(hover_text)
-                
-                fig.add_trace(go.Box(
-                    y=group_data[name_y],
-                    name=str(key),
-                    x=[str(key)] * len(group_data),
-                    boxpoints='all',
-                    pointpos=0,
-                    jitter=0.5,
-                    whiskerwidth=0.4,
-                    marker=dict(size=5, opacity=0.7, color='rgba(0,0,0,0.7)'),
-                    line=dict(width=1.5, color='black'),
-                    fillcolor=color,
-                    boxmean=True,
-                    width=0.8,
-                    text=hover_texts,
-                    hovertemplate='%{text}<extra></extra>'
-                ))
-            
-            fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
-        
-        # Calculate statistics
-        stats_df = data.groupby(name_x)[name_y].agg(['mean', 'std', 'min', 'max', 'count'])
-        
-        # Create title and subtitle
-        title_text = f"{name_y} by {name_x}"
-        if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
-            title_text += " (Reverse/Forward split)"
-        if data_type == "junk":
-            title_text += " (Filtered Out Data)"
-        
-        subtitle = f"Data from {len(data)} measurements"
-        if name_x in data.columns:
-            num_groups = data[name_x].nunique()
-            subtitle += f" across {num_groups} {name_x} groups"
-        
-        # Update layout
-        fig.update_layout(
-            title=title_text,
-            xaxis_title=name_x.replace('_', ' ').title(),
-            yaxis_title=name_y,
-            template="plotly_white",
-            showlegend=False,
-            hovermode='closest',
-            margin=dict(l=40, r=40, t=100, b=80),
-            plot_bgcolor='white',
-            paper_bgcolor='white'
-        )
-        
-        # Rotate x-axis labels if many categories
-        if not separate_scan_dir and len(data[name_x].unique()) > 4:
-            fig.update_layout(xaxis=dict(tickangle=-45, tickfont=dict(size=10)))
-        
-        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
-        
-        # Create filename
-        fig_name = f"Boxplot_{name_y}_by_{name_x}"
-        if separate_scan_dir:
-            fig_name += "_separated"
-        if data_type == "junk":
-            fig_name += "_filtered_out"
-        fig_name += ".html"
-        
-        wb = None
-        
-        return fig, fig_name, wb, title_text, subtitle

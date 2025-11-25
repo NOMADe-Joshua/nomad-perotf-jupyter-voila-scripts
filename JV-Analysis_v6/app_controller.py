@@ -719,21 +719,44 @@ If you tested specific variables or conditions for each sample, please write the
                         # Generate title and subtitle for boxplot
                         direction_note = " (Separated by Scan Direction)" if separate_scan_dir else ""
                         datatype = "junk" if "omitted" in plot_type else "data"
-                        title = f"Boxplot of {option1} by {option2.replace('by ', '')}{direction_note}"
-                        title += " (filtered out)" if datatype == "junk" else " (filtered data)"
                         
-                        filtered_df = data.get('filtered')
-                        num_measurements = len(filtered_df) if filtered_df is not None else 0
-                        
-                        # Handle different grouping columns
-                        grouping_col = option2.replace('by ', '')
-                        if grouping_col == 'Variable':
-                            grouping_col = 'condition'
-                        elif grouping_col == 'Scan Direction':
-                            grouping_col = 'direction'
-                        
-                        num_categories = filtered_df[grouping_col].nunique() if filtered_df is not None and grouping_col in filtered_df.columns else 0
-                        subtitle = f"Data from {num_measurements} measurements across {num_categories} categories"
+                        # CRITICAL FIX: Handle 'all' option where option1='all' and option2 contains the x-axis variable
+                        if option1 == 'all':
+                            # Combined grid boxplot: all 4 parameters in one grid
+                            grouping_display = option2.replace('by ', '') if option2 else 'Unknown'
+                            title = f"Combined Boxplots (PCE, FF, Jsc, Voc) by {grouping_display}{direction_note}"
+                            title += " (filtered out)" if datatype == "junk" else " (filtered data)"
+                            
+                            filtered_df = data.get('filtered')
+                            num_measurements = len(filtered_df) if filtered_df is not None else 0
+                            
+                            # Handle different grouping columns
+                            grouping_col = grouping_display
+                            if grouping_col == 'Variable':
+                                grouping_col = 'condition'
+                            elif grouping_col == 'Scan Direction':
+                                grouping_col = 'direction'
+                            
+                            num_categories = filtered_df[grouping_col].nunique() if filtered_df is not None and grouping_col in filtered_df.columns else 0
+                            subtitle = f"Data from {num_measurements} measurements across {num_categories} categories"
+                        else:
+                            # Regular single-parameter boxplot
+                            grouping_display = option2.replace('by ', '') if option2 else 'Unknown'
+                            title = f"Boxplot of {option1} by {grouping_display}{direction_note}"
+                            title += " (filtered out)" if datatype == "junk" else " (filtered data)"
+                            
+                            filtered_df = data.get('filtered')
+                            num_measurements = len(filtered_df) if filtered_df is not None else 0
+                            
+                            # Handle different grouping columns
+                            grouping_col = grouping_display
+                            if grouping_col == 'Variable':
+                                grouping_col = 'condition'
+                            elif grouping_col == 'Scan Direction':
+                                grouping_col = 'direction'
+                            
+                            num_categories = filtered_df[grouping_col].nunique() if filtered_df is not None and grouping_col in filtered_df.columns else 0
+                            subtitle = f"Data from {num_measurements} measurements across {num_categories} categories"
                         
                         titles.append(title)
                         subtitles.append(subtitle)

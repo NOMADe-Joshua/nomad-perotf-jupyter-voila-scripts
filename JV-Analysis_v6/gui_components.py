@@ -942,12 +942,15 @@ class PlotUI:
         plot_type = plot_type_dropdown.value
         
         if plot_type == 'Boxplot':
-            option1_dropdown.options = ['Voc', 'Jsc', 'FF', 'PCE', 'R_ser', 'R_shu', 'V_mpp', 'J_mpp', 'P_mpp']
+            # ADD 'all' to the beginning of the options list
+            option1_dropdown.options = ['all', 'Voc', 'Jsc', 'FF', 'PCE', 'R_ser', 'R_shu', 'V_mpp', 'J_mpp', 'P_mpp']
+            # Option 2 is ALWAYS the same for boxplots - this is CORRECT
             option2_dropdown.options = ['by Batch', 'by Variable', 'by Sample', 'by Cell', 'by Scan Direction',
                                        'by Status', 'by Status and Variable', 'by Direction and Variable', 'by Cell and Variable',
                                        'by Direction, Status and Variable']
         elif plot_type == 'Boxplot (omitted)':
-            option1_dropdown.options = ['Voc', 'Jsc', 'FF', 'PCE', 'R_ser', 'R_shu', 'V_mpp', 'J_mpp', 'P_mpp']
+            # ADD 'all' here too for consistency
+            option1_dropdown.options = ['all', 'Voc', 'Jsc', 'FF', 'PCE', 'R_ser', 'R_shu', 'V_mpp', 'J_mpp', 'P_mpp']
             option2_dropdown.options = ['by Batch', 'by Variable', 'by Sample', 'by Cell', 'by Scan Direction', 'by Status']
         elif plot_type == 'Histogram':
             option1_dropdown.options = ['Voc', 'Jsc', 'FF', 'PCE', 'R_ser', 'R_shu', 'V_mpp', 'J_mpp', 'P_mpp']
