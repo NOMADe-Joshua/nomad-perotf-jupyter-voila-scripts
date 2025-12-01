@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import os
 import sys
+import math  # Add this import for ceiling calculation
 
 # Add parent directory for shared modules
 parent_dir = os.path.dirname(os.getcwd())
@@ -425,9 +426,13 @@ class PlotManager:
         
         fig = go.Figure()
         
-        # Add axis lines
-        fig.add_shape(type="line", x0=-0.2, y0=0, x1=1.5, y1=0, line=dict(color="gray", width=2))
-        fig.add_shape(type="line", x0=0, y0=-30, x1=0, y1=5, line=dict(color="gray", width=2))
+        # Calculate dynamic axis ranges based on data
+        max_voc = jvc_data['Voc(V)'].max() if 'Voc(V)' in jvc_data.columns else 1.2
+        x_max = (math.ceil(max_voc * 10) / 10) + 0.1
+        
+        # Add axis lines with dynamic range
+        fig.add_shape(type="line", x0=-0.2, y0=0, x1=x_max, y1=0, line=dict(color="gray", width=2))
+        fig.add_shape(type="line", x0=0, y0=-5, x1=0, y1=25, line=dict(color="gray", width=2))
         
         if colors is None:
             colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
@@ -539,8 +544,8 @@ class PlotManager:
             title=f"JV Curves - Best Measurement per {grouping_col.title()}",
             xaxis_title='Voltage [V]',
             yaxis_title='Current Density [mA/cm²]',
-            xaxis=dict(range=[-0.2, 1.5]),
-            yaxis=dict(range=[-30, 5]),
+            xaxis=dict(range=[-0.2, x_max]),
+            yaxis=dict(range=[-5, 25]),
             template="plotly_white",
             legend=dict(
                 x=0.02,  # Start position left inside plot
@@ -603,9 +608,13 @@ class PlotManager:
 
         fig = go.Figure()
         
-        # Add axis lines
-        fig.add_shape(type="line", x0=-0.2, y0=0, x1=1.35, y1=0, line=dict(color="gray", width=2))
-        fig.add_shape(type="line", x0=0, y0=-25, x1=0, y1=3, line=dict(color="gray", width=2))
+        # Calculate dynamic axis ranges based on data
+        max_voc = jvc_data['Voc(V)'].max() if 'Voc(V)' in jvc_data.columns else 1.2
+        x_max = (math.ceil(max_voc * 10) / 10) + 0.1
+        
+        # Add axis lines with dynamic range
+        fig.add_shape(type="line", x0=-0.2, y0=0, x1=x_max, y1=0, line=dict(color="gray", width=2))
+        fig.add_shape(type="line", x0=0, y0=-5, x1=0, y1=25, line=dict(color="gray", width=2))
         
         if colors is None:
             colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
@@ -755,8 +764,8 @@ class PlotManager:
             title=f"JV Curves - Best Device ({best_sample} [Cell {best_cell}])",
             xaxis_title='Voltage [V]',
             yaxis_title='Current Density [mA/cm²]',
-            xaxis=dict(range=[-0.2, 1.5]),
-            yaxis=dict(range=[-26, 5]),
+            xaxis=dict(range=[-0.2, x_max]),
+            yaxis=dict(range=[-5, 25]),
             template="plotly_white",
             legend=dict(
                 x=0.02,  # Start left inside
@@ -797,9 +806,13 @@ class PlotManager:
         
         fig = go.Figure()
         
-        # Add axis lines
-        fig.add_shape(type="line", x0=-0.2, y0=0, x1=1.5, y1=0, line=dict(color="gray", width=2))
-        fig.add_shape(type="line", x0=0, y0=-30, x1=0, y1=5, line=dict(color="gray", width=2))
+        # Calculate dynamic axis ranges based on data
+        max_voc = jvc_data['Voc(V)'].max() if 'Voc(V)' in jvc_data.columns else 1.2
+        x_max = (math.ceil(max_voc * 10) / 10) + 0.1
+        
+        # Add axis lines with dynamic range
+        fig.add_shape(type="line", x0=-0.2, y0=0, x1=x_max, y1=0, line=dict(color="gray", width=2))
+        fig.add_shape(type="line", x0=0, y0=-5, x1=0, y1=25, line=dict(color="gray", width=2))
         
         if colors is None:
             colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
@@ -913,8 +926,8 @@ class PlotManager:
             title=f"JV Curves - Best Measurement per {grouping_col.title()}",
             xaxis_title='Voltage [V]',
             yaxis_title='Current Density [mA/cm²]',
-            xaxis=dict(range=[-0.2, 1.5]),
-            yaxis=dict(range=[-30, 5]),
+            xaxis=dict(range=[-0.2, x_max]),
+            yaxis=dict(range=[-5, 25]),
             template="plotly_white",
             legend=dict(
                 x=0.02,  # Start position left inside plot
@@ -974,9 +987,13 @@ class PlotManager:
         for (sample, cell), group_data in filtered_jvc_data.groupby(['sample', 'cell']):
             fig = go.Figure()
             
-            # Add axis lines
-            fig.add_shape(type="line", x0=-0.2, y0=0, x1=2.0, y1=0, line=dict(color="gray", width=2))
-            fig.add_shape(type="line", x0=0, y0=-30, x1=0, y1=5, line=dict(color="gray", width=2))
+            # Calculate dynamic axis ranges for this sample
+            max_voc = group_data['Voc(V)'].max() if 'Voc(V)' in group_data.columns else 1.2
+            x_max = (math.ceil(max_voc * 10) / 10) + 0.1
+            
+            # Add axis lines with dynamic range
+            fig.add_shape(type="line", x0=-0.2, y0=0, x1=x_max, y1=0, line=dict(color="gray", width=2))
+            fig.add_shape(type="line", x0=0, y0=-5, x1=0, y1=25, line=dict(color="gray", width=2))
             
             if colors is None:
                 colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
@@ -1034,8 +1051,8 @@ class PlotManager:
                     title=f"JV Curves - Sample: {sample} (Working Cells Only)",
                     xaxis_title='Voltage [V]',
                     yaxis_title='Current Density [mA/cm²]',
-                    xaxis=dict(range=[-0.2, 2.0]),
-                    yaxis=dict(range=[-30, 5]),
+                    xaxis=dict(range=[-0.2, x_max]),
+                    yaxis=dict(range=[-5, 25]),
                     template="plotly_white",
                     legend=dict(
                         x=0.02,
@@ -1057,8 +1074,8 @@ class PlotManager:
                     title=f"JV Curves - Sample: {sample} (All Cells)",
                     xaxis_title='Voltage [V]',
                     yaxis_title='Current Density [mA/cm²]',
-                    xaxis=dict(range=[-0.2, 2.0]),
-                    yaxis=dict(range=[-30, 5]),
+                    xaxis=dict(range=[-0.2, x_max]),
+                    yaxis=dict(range=[-5, 25]),
                     template="plotly_white",
                     legend=dict(
                         x=0.02,
@@ -1118,9 +1135,13 @@ class PlotManager:
         for (sample, cell), group_data in filtered_jvc_data.groupby(['sample', 'cell']):
             fig = go.Figure()
             
-            # Add axis lines
-            fig.add_shape(type="line", x0=-0.2, y0=0, x1=2.0, y1=0, line=dict(color="gray", width=2))
-            fig.add_shape(type="line", x0=0, y0=-30, x1=0, y1=5, line=dict(color="gray", width=2))
+            # Calculate dynamic axis ranges for this substrate
+            max_voc = group_data['Voc(V)'].max() if 'Voc(V)' in group_data.columns else 1.2
+            x_max = (math.ceil(max_voc * 10) / 10) + 0.1
+            
+            # Add axis lines with dynamic range
+            fig.add_shape(type="line", x0=-0.2, y0=0, x1=x_max, y1=0, line=dict(color="gray", width=2))
+            fig.add_shape(type="line", x0=0, y0=-5, x1=0, y1=25, line=dict(color="gray", width=2))
             
             if colors is None:
                 colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
@@ -1178,8 +1199,8 @@ class PlotManager:
                     title=f"JV Curves - Sample: {sample} (Working Cells Only)",
                     xaxis_title='Voltage [V]',
                     yaxis_title='Current Density [mA/cm²]',
-                    xaxis=dict(range=[-0.2, 2.0]),
-                    yaxis=dict(range=[-30, 5]),
+                    xaxis=dict(range=[-0.2, x_max]),
+                    yaxis=dict(range=[-5, 25]),
                     template="plotly_white",
                     legend=dict(
                         x=0.02,
@@ -1201,8 +1222,8 @@ class PlotManager:
                     title=f"JV Curves - Sample: {sample} (All Cells)",
                     xaxis_title='Voltage [V]',
                     yaxis_title='Current Density [mA/cm²]',
-                    xaxis=dict(range=[-0.2, 2.0]),
-                    yaxis=dict(range=[-30, 5]),
+                    xaxis=dict(range=[-0.2, x_max]),
+                    yaxis=dict(range=[-5, 25]),
                     template="plotly_white",
                     legend=dict(
                         x=0.02,
@@ -1527,7 +1548,7 @@ class PlotManager:
 
                 rev_data = group_data[group_data['direction'] == 'Reverse']
                 if not rev_data.empty:
-                    # Prepare hover data
+                    # Prepare hover data for reverse
                     hover_data = []
                     for idx, row_data in rev_data.iterrows():
                         condition_val = row_data.get('condition', row_data.get(name_x, 'N/A'))
@@ -1566,7 +1587,7 @@ class PlotManager:
 
                 fwd_data = group_data[group_data['direction'] == 'Forward']
                 if not fwd_data.empty:
-                    # Prepare hover data
+                    # Prepare hover data for forward
                     hover_data = []
                     for idx, row_data in fwd_data.iterrows():
                         condition_val = row_data.get('condition', row_data.get(name_x, 'N/A'))
