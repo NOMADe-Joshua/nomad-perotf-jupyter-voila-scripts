@@ -126,7 +126,7 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
                 fig, fig_name, wb, title_text, subtitle = plot_manager.create_boxplot(
                     omitted_jv, var_x, var_y,
                     [filtered_jv, filter_pars],
-                    "junk",
+                    "junk", colors=color_scheme,  # FIX: Added missing colors argument
                     separate_scan_dir=separate_scan_dir
                 )
             elif "H" in pl and var_y:
@@ -1238,7 +1238,7 @@ class PlotManager:
 
         fig = make_subplots(
             rows=2, cols=2,
-            subplot_titles=[p['title'] for p in parameters],
+            subplot_titles=None,
             vertical_spacing=0.12,
             horizontal_spacing=0.10,
             specs=[[{"type": "box"}, {"type": "box"}],
@@ -1249,7 +1249,8 @@ class PlotManager:
         num_categories = len(group_keys)
 
         if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
-            distributed_colors = self._get_intelligent_colors(group_keys, num_categories * 2, color_scheme=colors)
+            # Use one base color per category
+            distributed_colors = self._get_intelligent_colors(group_keys, num_categories, color_scheme=colors)
         else:
             distributed_colors = self._get_intelligent_colors(group_keys, num_categories, color_scheme=colors)
 
@@ -1263,17 +1264,30 @@ class PlotManager:
                 continue
 
             if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
-                # Split each category into Reverse/Forward
                 for i, key in enumerate(group_keys):
                     group_data = data[data[name_x] == key]
-                    base_color = distributed_colors[i * 2]
-                    fwd_color = distributed_colors[i * 2 + 1]
+                    base_color = distributed_colors[i]
+                    rev_color = self._darken_rgba(base_color, factor=0.25)
+                    fwd_color = self._lighten_rgba(base_color, factor=0.25)
                     x_center = i
                     x_left = x_center - 0.2
                     x_right = x_center + 0.2
 
                     rev_data = group_data[group_data['direction'] == 'Reverse']
                     if not rev_data.empty:
+                        # Prepare hover data for reverse
+                        hover_data = []
+                        for idx, row_data in rev_data.iterrows():
+                            condition_val = row_data.get('condition', row_data.get(name_x, 'N/A'))
+                            hover_data.append([
+                                condition_val,
+                                row_data.get('direction', 'N/A'),
+                                row_data.get('PCE(%)', 'N/A'),
+                                row_data.get('FF(%)', 'N/A'),
+                                row_data.get('Jsc(mA/cm2)', 'N/A'),
+                                row_data.get('Voc(V)', 'N/A')
+                            ])
+                        
                         fig.add_trace(go.Box(
                             y=rev_data[param_name],
                             name=f"{key} [R]" if param_idx == 0 else "",
@@ -1284,15 +1298,36 @@ class PlotManager:
                             whiskerwidth=0.4,
                             marker=dict(size=4, opacity=0.7, color='rgba(0,0,0,0.7)'),
                             line=dict(width=1.5, color='black'),
-                            fillcolor=base_color,
+                            fillcolor=rev_color,
                             boxmean=True,
                             width=0.3,
                             legendgroup=f"{key}_R",
-                            showlegend=(param_idx == 0)
+                            showlegend=(param_idx == 0),
+                            customdata=hover_data,
+                            hovertemplate='<b>%{customdata[0]}</b><br>' +
+                                        'Direction: %{customdata[1]}<br>' +
+                                        'PCE: %{customdata[2]:.2f}%<br>' +
+                                        'FF: %{customdata[3]:.2f}%<br>' +
+                                        'Jsc: %{customdata[4]:.2f} mA/cm²<br>' +
+                                        'Voc: %{customdata[5]:.3f} V<br>' +
+                                        '<extra></extra>'
                         ), row=row, col=col)
 
                     fwd_data = group_data[group_data['direction'] == 'Forward']
                     if not fwd_data.empty:
+                        # Prepare hover data for forward
+                        hover_data = []
+                        for idx, row_data in fwd_data.iterrows():
+                            condition_val = row_data.get('condition', row_data.get(name_x, 'N/A'))
+                            hover_data.append([
+                                condition_val,
+                                row_data.get('direction', 'N/A'),
+                                row_data.get('PCE(%)', 'N/A'),
+                                row_data.get('FF(%)', 'N/A'),
+                                row_data.get('Jsc(mA/cm2)', 'N/A'),
+                                row_data.get('Voc(V)', 'N/A')
+                            ])
+                        
                         fig.add_trace(go.Box(
                             y=fwd_data[param_name],
                             name=f"{key} [F]" if param_idx == 0 else "",
@@ -1307,7 +1342,15 @@ class PlotManager:
                             boxmean=True,
                             width=0.3,
                             legendgroup=f"{key}_F",
-                            showlegend=(param_idx == 0)
+                            showlegend=(param_idx == 0),
+                            customdata=hover_data,
+                            hovertemplate='<b>%{customdata[0]}</b><br>' +
+                                        'Direction: %{customdata[1]}<br>' +
+                                        'PCE: %{customdata[2]:.2f}%<br>' +
+                                        'FF: %{customdata[3]:.2f}%<br>' +
+                                        'Jsc: %{customdata[4]:.2f} mA/cm²<br>' +
+                                        'Voc: %{customdata[5]:.3f} V<br>' +
+                                        '<extra></extra>'
                         ), row=row, col=col)
 
                 fig.update_xaxes(
@@ -1319,9 +1362,7 @@ class PlotManager:
                     gridcolor='lightgray',
                     row=row, col=col
                 )
-
             else:
-                # Standard single box per category
                 if name_x == 'direction' and set(data[name_x].unique()) == {'Forward', 'Reverse'}:
                     group_keys_param = ['Reverse', 'Forward']
                 else:
@@ -1331,6 +1372,20 @@ class PlotManager:
                     group_data = data[data[name_x] == key]
                     if group_data.empty:
                         continue
+                    
+                    # Prepare hover data
+                    hover_data = []
+                    for idx, row_data in group_data.iterrows():
+                        condition_val = row_data.get('condition', row_data.get(name_x, 'N/A'))
+                        hover_data.append([
+                            condition_val,
+                            row_data.get('direction', 'N/A'),
+                            row_data.get('PCE(%)', 'N/A'),
+                            row_data.get('FF(%)', 'N/A'),
+                            row_data.get('Jsc(mA/cm2)', 'N/A'),
+                            row_data.get('Voc(V)', 'N/A')
+                        ])
+                    
                     color = distributed_colors[i]
                     fig.add_trace(go.Box(
                         y=group_data[param_name],
@@ -1346,7 +1401,15 @@ class PlotManager:
                         boxmean=True,
                         width=0.8,
                         legendgroup=str(key),
-                        showlegend=(param_idx == 0)
+                        showlegend=(param_idx == 0),
+                        customdata=hover_data,
+                        hovertemplate='<b>%{customdata[0]}</b><br>' +
+                                    'Direction: %{customdata[1]}<br>' +
+                                    'PCE: %{customdata[2]:.2f}%<br>' +
+                                    'FF: %{customdata[3]:.2f}%<br>' +
+                                    'Jsc: %{customdata[4]:.2f} mA/cm²<br>' +
+                                    'Voc: %{customdata[5]:.3f} V<br>' +
+                                    '<extra></extra>'
                     ), row=row, col=col)
 
                 fig.update_xaxes(
@@ -1384,15 +1447,9 @@ class PlotManager:
         fig.update_layout(
             title=dict(text=title_text, x=0.5, xanchor='center', font=dict(size=16, color='black')),
             template="plotly_white",
-            showlegend=True,
-            legend=dict(
-                x=1.02, y=1,
-                xanchor="left", yanchor="top",
-                bgcolor="rgba(255,255,255,0.9)",
-                bordercolor="black", borderwidth=1
-            ),
+            showlegend=False,
             height=700,
-            margin=dict(l=80, r=200, t=100, b=80),
+            margin=dict(l=80, r=200, t=130, b=80),
             plot_bgcolor='white',
             paper_bgcolor='white',
             hovermode='closest'
@@ -1438,85 +1495,210 @@ class PlotManager:
         num_categories = len(group_keys)
         
         if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
-            distributed_colors = self._get_intelligent_colors(group_keys, num_categories * 2, color_scheme=colors)
+            distributed_colors = self._get_intelligent_colors(group_keys, num_categories, color_scheme=colors)
         else:
             distributed_colors = self._get_intelligent_colors(group_keys, num_categories, color_scheme=colors)
-        
+
         if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
             for i, key in enumerate(group_keys):
                 group_data = data[data[name_x] == key]
-                base_color = distributed_colors[i * 2]
-                fwd_color = distributed_colors[i * 2 + 1]
+                base_color = distributed_colors[i]
+                rev_color = self._darken_rgba(base_color, factor=0.25)
+                fwd_color = self._lighten_rgba(base_color, factor=0.25)
                 x_center = i
                 x_left = x_center - 0.2
                 x_right = x_center + 0.2
-                
+
                 rev_data = group_data[group_data['direction'] == 'Reverse']
                 if not rev_data.empty:
+                    # Prepare hover data
+                    hover_data = []
+                    for idx, row_data in rev_data.iterrows():
+                        condition_val = row_data.get('condition', row_data.get(name_x, 'N/A'))
+                        hover_data.append([
+                            condition_val,
+                            row_data.get('direction', 'N/A'),
+                            row_data.get('PCE(%)', 'N/A'),
+                            row_data.get('FF(%)', 'N/A'),
+                            row_data.get('Jsc(mA/cm2)', 'N/A'),
+                            row_data.get('Voc(V)', 'N/A')
+                        ])
+                    
                     fig.add_trace(go.Box(
-                        y=rev_data[name_y], name=f"{key} [R]",
-                        x=[x_left] * len(rev_data), boxpoints='all',
-                        marker=dict(size=4, opacity=0.7),
-                        fillcolor=base_color, boxmean=True, width=0.3
+                        y=rev_data[name_y],
+                        name=f"{key} [R]",
+                        x=[x_left] * len(rev_data),
+                        boxpoints='all',
+                        pointpos=0,
+                        jitter=0.5,
+                        whiskerwidth=0.4,
+                        marker=dict(size=4, opacity=0.7, color='rgba(0,0,0,0.7)'),
+                        line=dict(width=1.5, color='black'),
+                        fillcolor=rev_color,
+                        boxmean=True,
+                        width=0.3,
+                        legendgroup=f"{key}_R",
+                        customdata=hover_data,
+                        hovertemplate='<b>%{customdata[0]}</b><br>' +
+                                    'Direction: %{customdata[1]}<br>' +
+                                    'PCE: %{customdata[2]:.2f}%<br>' +
+                                    'FF: %{customdata[3]:.2f}%<br>' +
+                                    'Jsc: %{customdata[4]:.2f} mA/cm²<br>' +
+                                    'Voc: %{customdata[5]:.3f} V<br>' +
+                                    '<extra></extra>'
                     ))
-                
+
                 fwd_data = group_data[group_data['direction'] == 'Forward']
                 if not fwd_data.empty:
+                    # Prepare hover data
+                    hover_data = []
+                    for idx, row_data in fwd_data.iterrows():
+                        condition_val = row_data.get('condition', row_data.get(name_x, 'N/A'))
+                        hover_data.append([
+                            condition_val,
+                            row_data.get('direction', 'N/A'),
+                            row_data.get('PCE(%)', 'N/A'),
+                            row_data.get('FF(%)', 'N/A'),
+                            row_data.get('Jsc(mA/cm2)', 'N/A'),
+                            row_data.get('Voc(V)', 'N/A')
+                        ])
+                    
                     fig.add_trace(go.Box(
-                        y=fwd_data[name_y], name=f"{key} [F]",
-                        x=[x_right] * len(fwd_data), boxpoints='all',
-                        marker=dict(size=4, opacity=0.7),
-                        fillcolor=fwd_color, boxmean=True, width=0.3
+                        y=fwd_data[name_y],
+                        name=f"{key} [F]",
+                        x=[x_right] * len(fwd_data),
+                        boxpoints='all',
+                        pointpos=0,
+                        jitter=0.5,
+                        whiskerwidth=0.4,
+                        marker=dict(size=4, opacity=0.7, color='rgba(0,0,0,0.7)'),
+                        line=dict(width=1.5, color='black'),
+                        fillcolor=fwd_color,
+                        boxmean=True,
+                        width=0.3,
+                        legendgroup=f"{key}_F",
+                        customdata=hover_data,
+                        hovertemplate='<b>%{customdata[0]}</b><br>' +
+                                    'Direction: %{customdata[1]}<br>' +
+                                    'PCE: %{customdata[2]:.2f}%<br>' +
+                                    'FF: %{customdata[3]:.2f}%<br>' +
+                                    'Jsc: %{customdata[4]:.2f} mA/cm²<br>' +
+                                    'Voc: %{customdata[5]:.3f} V<br>' +
+                                    '<extra></extra>'
                     ))
-            
-            fig.update_xaxes(tickmode='array', tickvals=list(range(len(group_keys))), ticktext=list(group_keys))
+
+            fig.update_xaxes(
+                tickmode='array',
+                tickvals=list(range(len(group_keys))),
+                ticktext=list(group_keys),
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='lightgray'
+            )
         else:
             if name_x == 'direction' and set(data[name_x].unique()) == {'Forward', 'Reverse'}:
                 group_keys = ['Reverse', 'Forward']
-            
+
             for i, key in enumerate(group_keys):
                 group_data = data[data[name_x] == key]
                 if group_data.empty:
                     continue
+                
+                # Prepare hover data
+                hover_data = []
+                for idx, row_data in group_data.iterrows():
+                    condition_val = row_data.get('condition', row_data.get(name_x, 'N/A'))
+                    hover_data.append([
+                        condition_val,
+                        row_data.get('direction', 'N/A'),
+                        row_data.get('PCE(%)', 'N/A'),
+                        row_data.get('FF(%)', 'N/A'),
+                        row_data.get('Jsc(mA/cm2)', 'N/A'),
+                        row_data.get('Voc(V)', 'N/A')
+                    ])
+                
                 color = distributed_colors[i]
                 fig.add_trace(go.Box(
-                    y=group_data[name_y], name=str(key),
-                    x=[str(key)] * len(group_data), boxpoints='all',
-                    marker=dict(size=5, opacity=0.7),
-                    fillcolor=color, boxmean=True, width=0.8
+                    y=group_data[name_y],
+                    name=str(key),
+                    x=[str(key)] * len(group_data),
+                    boxpoints='all',
+                    pointpos=0,
+                    jitter=0.5,
+                    whiskerwidth=0.4,
+                    marker=dict(size=4, opacity=0.7, color='rgba(0,0,0,0.7)'),
+                    line=dict(width=1.5, color='black'),
+                    fillcolor=color,
+                    boxmean=True,
+                    width=0.8,
+                    legendgroup=str(key),
+                    customdata=hover_data,
+                    hovertemplate='<b>%{customdata[0]}</b><br>' +
+                                'Direction: %{customdata[1]}<br>' +
+                                'PCE: %{customdata[2]:.2f}%<br>' +
+                                'FF: %{customdata[3]:.2f}%<br>' +
+                                'Jsc: %{customdata[4]:.2f} mA/cm²<br>' +
+                                'Voc: %{customdata[5]:.3f} V<br>' +
+                                '<extra></extra>'
                 ))
-        
-        title_text = f"{name_y} by {name_x}"
-        if separate_scan_dir:
-            title_text += " (Separated)"
+
+            fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+
+        # Title and layout
+        x_axis_display = name_x.replace('_', ' ').title()
+        if name_x == 'condition':
+            x_axis_display = 'Variable'
+        elif name_x == 'batch_for_plotting':
+            x_axis_display = 'Batch'
+
+        title_text = f"Boxplot of {x_axis_display} by {name_y}"
+        if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
+            title_text += " (Reverse/Forward split)"
         if data_type == "junk":
-            title_text += " (Filtered Out)"
-        
+            title_text += " (Filtered Out Data)"
+
         fig.update_layout(
-            title=title_text,
-            xaxis_title=name_x.replace('_', ' ').title(),
-            yaxis_title=name_y,
+            title=dict(text=title_text, x=0.5, xanchor='center', font=dict(size=16, color='black')),
             template="plotly_white",
-            showlegend=False
+            showlegend=False,  # Legende ausschalten
+            height=700,
+            margin=dict(l=80, r=200, t=130, b=80),  # Weniger rechten Rand ohne Legende
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            hovermode='closest'
         )
-        
+
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+
         fig_name = f"Boxplot_{name_y}_by_{name_x}"
         if separate_scan_dir:
             fig_name += "_separated"
         if data_type == "junk":
             fig_name += "_filtered_out"
         fig_name += ".html"
-        
+
         return fig, fig_name, None, title_text, ""
+    
+    def _lighten_rgba(self, rgba_str, factor=0.3):
+        r, g, b, a = self._extract_rgb_from_color(rgba_str)
+        r = min(255, int(r + (255 - r) * factor))
+        g = min(255, int(g + (255 - g) * factor))
+        b = min(255, int(b + (255 - b) * factor))
+        return f'rgba({r}, {g}, {b}, {a})'
+
+    def _darken_rgba(self, rgba_str, factor=0.3):
+        r, g, b, a = self._extract_rgb_from_color(rgba_str)
+        r = max(0, int(r * (1 - factor)))
+        g = max(0, int(g * (1 - factor)))
+        b = max(0, int(b * (1 - factor)))
+        return f'rgba({r}, {g}, {b}, {a})'
 
     def _get_intelligent_colors(self, categories, num_needed, color_scheme=None):
         """Distribute colors intelligently"""
         if color_scheme is None:
             color_scheme = ['rgba(93, 164, 214, 0.7)', 'rgba(255, 144, 14, 0.7)']
-        
         if num_needed <= len(color_scheme):
             return color_scheme[:num_needed]
-        
         colors = []
         for i in range(num_needed):
             colors.append(color_scheme[i % len(color_scheme)])
