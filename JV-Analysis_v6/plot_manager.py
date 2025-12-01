@@ -553,7 +553,9 @@ class PlotManager:
                 font=dict(size=10)  # Slightly smaller font to save space
             ),
             showlegend=True,
-            margin=dict(l=80, r=50, t=80, b=80)  # Normal margins
+            margin=dict(l=80, r=50, t=80, b=80),  # Normal margins
+            width=1600,  # 16:10 ratio width
+            height=1000,  # 16:10 ratio height
         )
         
         fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
@@ -767,7 +769,9 @@ class PlotManager:
                 font=dict(size=10)
             ),
             showlegend=True,
-            margin=dict(l=80, r=50, t=80, b=80)
+            margin=dict(l=80, r=50, t=80, b=80),
+            width=1600,  # 16:10 ratio width
+            height=1000,  # 16:10 ratio height
         )
         
         fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
@@ -923,7 +927,9 @@ class PlotManager:
                 font=dict(size=10)  # Slightly smaller font to save space
             ),
             showlegend=True,
-            margin=dict(l=80, r=50, t=80, b=80)  # Normal margins
+            margin=dict(l=80, r=50, t=80, b=80),  # Normal margins
+            width=1600,  # 16:10 ratio width
+            height=1000,  # 16:10 ratio height
         )
         
         fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
@@ -1042,7 +1048,9 @@ class PlotManager:
                         font=dict(size=10)
                     ),
                     showlegend=True,
-                    margin=dict(l=80, r=50, t=80, b=80)
+                    margin=dict(l=80, r=50, t=80, b=80),
+                    width=1600,  # 16:10 ratio width
+                    height=1000,  # 16:10 ratio height
                 )
             else:
                 fig.update_layout(
@@ -1063,7 +1071,9 @@ class PlotManager:
                         font=dict(size=10)
                     ),
                     showlegend=True,
-                    margin=dict(l=80, r=50, t=80, b=80)
+                    margin=dict(l=80, r=50, t=80, b=80),
+                    width=1600,  # 16:10 ratio width
+                    height=1000,  # 16:10 ratio height
                 )
         
             fig_list.append(fig)
@@ -1182,7 +1192,9 @@ class PlotManager:
                         font=dict(size=10)
                     ),
                     showlegend=True,
-                    margin=dict(l=80, r=50, t=80, b=80)
+                    margin=dict(l=80, r=50, t=80, b=80),
+                    width=1600,  # 16:10 ratio width
+                    height=1000,  # 16:10 ratio height
                 )
             else:
                 fig.update_layout(
@@ -1203,7 +1215,9 @@ class PlotManager:
                         font=dict(size=10)
                     ),
                     showlegend=True,
-                    margin=dict(l=80, r=50, t=80, b=80)
+                    margin=dict(l=80, r=50, t=80, b=80),
+                    width=1600,  # 16:10 ratio width
+                    height=1000,  # 16:10 ratio height
                 )
         
             fig_list.append(fig)
@@ -1239,8 +1253,9 @@ class PlotManager:
         fig = make_subplots(
             rows=2, cols=2,
             subplot_titles=None,
-            vertical_spacing=0.12,
-            horizontal_spacing=0.10,
+            # SPACING CONTROLS:
+            vertical_spacing=0.07,    # 👈 Distance between rows (0-1, default ~0.2)
+            horizontal_spacing=0.06,  # 👈 Distance between columns (0-1, default ~0.2)
             specs=[[{"type": "box"}, {"type": "box"}],
                    [{"type": "box"}, {"type": "box"}]]
         )
@@ -1448,7 +1463,8 @@ class PlotManager:
             title=dict(text=title_text, x=0.5, xanchor='center', font=dict(size=16, color='black')),
             template="plotly_white",
             showlegend=False,
-            height=700,
+            width=1600,   # 👈 CHANGED: 16:10 aspect ratio width
+            height=1000,  # 👈 CHANGED: 16:10 aspect ratio height
             margin=dict(l=80, r=200, t=130, b=80),
             plot_bgcolor='white',
             paper_bgcolor='white',
@@ -1660,9 +1676,10 @@ class PlotManager:
         fig.update_layout(
             title=dict(text=title_text, x=0.5, xanchor='center', font=dict(size=16, color='black')),
             template="plotly_white",
-            showlegend=False,  # Legende ausschalten
-            height=700,
-            margin=dict(l=80, r=200, t=130, b=80),  # Weniger rechten Rand ohne Legende
+            showlegend=False,
+            width=1600,   # 👈 CHANGED: 16:10 aspect ratio width  
+            height=1000,  # 👈 CHANGED: 16:10 aspect ratio height
+            margin=dict(l=80, r=200, t=130, b=80),
             plot_bgcolor='white',
             paper_bgcolor='white',
             hovermode='closest'
