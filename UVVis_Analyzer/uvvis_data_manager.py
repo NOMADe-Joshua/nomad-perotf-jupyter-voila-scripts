@@ -3,9 +3,9 @@ UVVis Data Management Module
 Handles data loading, processing, and filtering for UVVis measurements.
 """
 
-__author__ = "Adapted from JV Analysis"
-__institution__ = "Helmholtz-Zentrum Berlin / KIT"
-__created__ = "January 2025"
+__author__ = "Joshua Damm"
+__institution__ = "Karlsruhe Institute of Technology"
+__created__ = "December 2025"
 
 import pandas as pd
 import numpy as np

@@ -17,16 +17,17 @@ parent_dir = os.path.dirname(os.path.dirname(os.getcwd()))
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
-# Add JV-Analysis directory for shared components
+# CRITICAL FIX: Add JV-Analysis directory to path for shared components
 jv_dir = os.path.join(parent_dir, 'JV-Analysis_v6')
 if jv_dir not in sys.path:
     sys.path.append(jv_dir)
 
+# Now imports should work
 from uvvis_data_manager import UVVisDataManager
 from uvvis_plot_manager import UVVisPlotManager
 from uvvis_gui_components import UVVisAuthenticationUI, UVVisBatchSelector, UVVisPlotUI, UVVisSaveUI
-from gui_components import ColorSchemeSelector
-from resizable_plot_utility import ResizablePlotManager
+from gui_components import ColorSchemeSelector  # From JV-Analysis
+from resizable_plot_utility import ResizablePlotManager  # From JV-Analysis
 
 
 class SimpleAuthManager:
@@ -187,7 +188,28 @@ class UVVisAnalysisApp:
             print("🔄 Creating plots...")
         
         try:
-            figs, names = self.plot_manager.create_spectra_plot(measurements, colors, plot_mode)
+            # Handle different plot modes
+            if plot_mode == 'bandgap_derivative':
+                x_axis = self.plot_ui.get_x_axis_mode()
+                fig, name = self.plot_manager.create_bandgap_derivative_plot(
+                    measurements, colors, x_axis
+                )
+                figs = [fig]
+                names = [name]
+                
+            elif plot_mode == 'tauc_plot':
+                thickness = self.plot_ui.get_thickness()
+                fig, name = self.plot_manager.create_tauc_plot(
+                    measurements, colors, thickness
+                )
+                figs = [fig]
+                names = [name]
+                
+            else:
+                # Regular spectra plots
+                figs, names = self.plot_manager.create_spectra_plot(
+                    measurements, colors, plot_mode
+                )
             
             if not isinstance(figs, list):
                 figs = [figs]
@@ -197,7 +219,9 @@ class UVVisAnalysisApp:
             
             with self.plot_ui.plotted_content:
                 clear_output(wait=True)
-                ResizablePlotManager.display_plots_resizable(figs, names, container_widget=self.plot_ui.plotted_content)
+                ResizablePlotManager.display_plots_resizable(
+                    figs, names, container_widget=self.plot_ui.plotted_content
+                )
                 print("✅ Plots created! Proceed to save tab.")
             
             self.tabs.selected_index = 2
