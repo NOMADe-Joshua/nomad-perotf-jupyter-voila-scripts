@@ -16,6 +16,45 @@ def get_all_uploads(url, token, number_of_uploads=20):
     return response.json()["data"]
 
 
+def get_user_batches(url, token, max_batches=100):
+    """
+    Get all batches/uploads for the authenticated user.
+    Returns list of dictionaries with batch information.
+    
+    Args:
+        url: NOMAD API URL
+        token: Authentication token
+        max_batches: Maximum number of batches to retrieve
+    
+    Returns:
+        List of dicts with 'upload_id' and 'upload_name' keys
+    """
+    response = requests.get(
+        f'{url}/uploads',
+        headers={'Authorization': f'Bearer {token}'},
+        params=dict(
+            page_size=max_batches,
+            order_by='upload_create_time',
+            order='desc'
+        )
+    )
+    response.raise_for_status()
+    
+    uploads = response.json()["data"]
+    
+    # Return list of dictionaries with standardized keys
+    batches = []
+    for upload in uploads:
+        batches.append({
+            'upload_id': upload.get('upload_id', ''),
+            'upload_name': upload.get('upload_name', 'Unnamed Upload'),
+            'upload_create_time': upload.get('upload_create_time', ''),
+            'process_status': upload.get('process_status', 'unknown')
+        })
+    
+    return batches
+
+
 def get_template(url, token, upload_name, method):
     query = {
         'required': {

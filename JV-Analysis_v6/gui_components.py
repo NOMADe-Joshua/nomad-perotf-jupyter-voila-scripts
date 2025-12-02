@@ -855,11 +855,13 @@ class PlotUI:
                 ("Boxplot", "Voc", "by Variable"), 
                 ("Boxplot", "Jsc", "by Variable"), 
                 ("Boxplot", "FF", "by Variable"), 
-                ("JV Curve", "Best device per condition", "")
+                ("JV Curve", "Best device per condition", ""),
+                ("Boxplot", "all", "by Variable")  # Added
             ],
             "Preset 2": [
                 ("Boxplot", "Voc", "by Cell"), 
-                ("Histogram", "Voc", "")
+                ("Histogram", "Voc", ""),
+                ("Boxplot", "all", "by Variable")  # Added
             ],
             "Advanced Analysis": [
                 ("Boxplot", "PCE", "by Status"), 
@@ -867,7 +869,8 @@ class PlotUI:
                 ("Boxplot", "PCE", "by Direction and Variable"), 
                 ("Boxplot", "PCE", "by Cell and Variable"),
                 ("Boxplot", "PCE", "by Direction, Status and Variable"),
-                ("JV Curve", "Best device per condition", "")
+                ("JV Curve", "Best device per condition", ""),
+                ("Boxplot", "all", "by Variable")  # Added
             ]
         }
         self._create_widgets()
