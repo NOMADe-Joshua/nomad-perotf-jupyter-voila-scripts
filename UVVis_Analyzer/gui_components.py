@@ -3,9 +3,9 @@ GUI Components Module (Shared)
 Contains reusable UI components - copied from JV-Analysis.
 """
 
-__author__ = "Edgar Nandayapa (adapted for UVVis)"
-__institution__ = "Helmholtz-Zentrum Berlin / KIT"
-__created__ = "January 2025"
+__author__ = "Joshua Damm"
+__institution__ = "KIT"
+__created__ = "December 2025"
 
 import ipywidgets as widgets
 from IPython.display import display, clear_output, HTML

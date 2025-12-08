@@ -3,9 +3,9 @@ UVVis Plot Management Module
 Handles all plotting operations for UVVis spectra.
 """
 
-__author__ = "Adapted from JV Analysis"
-__institution__ = "Helmholtz-Zentrum Berlin / KIT"
-__created__ = "January 2025"
+__author__ = "Joshua Damm"
+__institution__ = "KIT"
+__created__ = "December 2025"
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots

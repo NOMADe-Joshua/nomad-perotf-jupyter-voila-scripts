@@ -3,9 +3,9 @@ UVVis Application Controller
 Main orchestrator for the UVVis Analysis Dashboard.
 """
 
-__author__ = "Adapted from JV Analysis"
-__institution__ = "Helmholtz-Zentrum Berlin / KIT"
-__created__ = "January 2025"
+__author__ = "Joshua Damm"
+__institution__ = "KIT"
+__created__ = "December 2025"
 
 import ipywidgets as widgets
 from IPython.display import display, clear_output, Markdown
@@ -44,6 +44,11 @@ class SimpleAuthManager:
     def set_status_callback(self, callback):
         self.status_callback = callback
     
+    def _update_status(self, message, color=None):
+        """Update status through callback if available"""
+        if self.status_callback:
+            self.status_callback(message, color)
+    
     def authenticate_with_credentials(self, username, password):
         import requests
         if not username or not password:
@@ -52,29 +57,58 @@ class SimpleAuthManager:
         auth_dict = dict(username=username, password=password)
         token_url = f"{self.url}/auth/token"
         
-        response = requests.get(token_url, params=auth_dict, timeout=10)
-        response.raise_for_status()
-        
-        token_data = response.json()
-        self.current_token = token_data['access_token']
-        return self.current_token
+        try:
+            response = requests.get(token_url, params=auth_dict, timeout=10)
+            response.raise_for_status()
+            
+            token_data = response.json()
+            self.current_token = token_data['access_token']
+            return self.current_token
+        except requests.exceptions.RequestException as e:
+            self._handle_request_error(e)
+            raise
     
     def authenticate_with_token(self, token=None):
         if token is None:
             token = os.environ.get('NOMAD_CLIENT_ACCESS_TOKEN')
             if not token:
-                raise ValueError("Token not found")
+                raise ValueError("Token not found in environment variable 'NOMAD_CLIENT_ACCESS_TOKEN'.")
         self.current_token = token
         return self.current_token
     
     def verify_token(self):
         import requests
+        if not self.current_token:
+            raise ValueError("No token available for verification.")
+            
         verify_url = f"{self.url}/users/me"
         headers = {'Authorization': f'Bearer {self.current_token}'}
-        verify_response = requests.get(verify_url, headers=headers, timeout=10)
-        verify_response.raise_for_status()
-        self.current_user_info = verify_response.json()
-        return self.current_user_info
+        
+        try:
+            verify_response = requests.get(verify_url, headers=headers, timeout=10)
+            verify_response.raise_for_status()
+            self.current_user_info = verify_response.json()
+            return self.current_user_info
+        except requests.exceptions.RequestException as e:
+            self._handle_request_error(e)
+            raise
+    
+    def _handle_request_error(self, e):
+        """Handle and format request errors consistently"""
+        import json
+        if e.response is not None:
+            try:
+                error_detail = e.response.json().get('detail', e.response.text)
+                if isinstance(error_detail, list):
+                    error_message = f"API Error ({e.response.status_code}): {json.dumps(error_detail)}"
+                else:
+                    error_message = f"API Error ({e.response.status_code}): {error_detail or e.response.text}"
+            except json.JSONDecodeError:
+                error_message = f"API Error ({e.response.status_code}): {e.response.text}"
+        else:
+            error_message = f"Network/API Error: {e}"
+        
+        self._update_status(f'Status: {error_message}', 'red')
     
     def is_authenticated(self):
         return self.current_token is not None
@@ -156,7 +190,8 @@ class UVVisAnalysisApp:
             token = self.auth_manager.current_token
             
             batches = get_user_batches(url, token)
-            batch_options = [(f"{b['upload_id']} - {b.get('upload_name', 'Unnamed')}", b['upload_id']) for b in batches]
+            # Only show upload name, store upload_id as value
+            batch_options = [(b.get('upload_name', 'Unnamed'), b['upload_id']) for b in batches]
             self.batch_selector.set_options(batch_options)
             
         except Exception as e:

@@ -4,7 +4,7 @@ Handles data loading, processing, and filtering for UVVis measurements.
 """
 
 __author__ = "Joshua Damm"
-__institution__ = "Karlsruhe Institute of Technology"
+__institution__ = "KIT"
 __created__ = "December 2025"
 
 import pandas as pd
@@ -64,7 +64,7 @@ class UVVisDataManager:
         self.measurements_df = None
     
     def load_batch_data(self, batch_ids, output_widget=None):
-        """Load UVVis data from selected batch IDs"""
+        """Load UVVis data from selected batch IDs (upload_ids)"""
         self.data = {}
         self.samples = []
         
@@ -89,36 +89,54 @@ class UVVisDataManager:
                     print("🔍 Loading UVVis data...")
                     print(f"   Batches: {batch_ids}")
             
-            # Get sample IDs from batches
-            sample_ids = get_ids_in_batch(url, token, batch_ids)
+            # Query samples directly by upload_id instead of using get_ids_in_batch
+            # which expects batch lab_ids
+            query = {
+                'required': {
+                    'metadata': '*',
+                    'data': '*'
+                },
+                'owner': 'visible',
+                'query': {
+                    'upload_id:any': batch_ids,
+                    'entry_type': 'peroTF_UVvisMeasurement'
+                },
+                'pagination': {
+                    'page_size': 1000
+                }
+            }
+            
+            response = requests.post(
+                f'{url}/entries/archive/query',
+                headers={'Authorization': f'Bearer {token}'},
+                json=query
+            )
+            response.raise_for_status()
+            uvvis_entries = response.json()["data"]
             
             if output_widget:
                 with output_widget:
-                    print(f"   Found {len(sample_ids)} samples")
+                    print(f"   Found {len(uvvis_entries)} UVVis measurements")
             
-            # Load UVVis data for each sample
+            # Load UVVis data from each entry
             all_measurements = []
             successful_samples = 0
             failed_samples = 0
             
-            for i, sample_id in enumerate(sample_ids):
+            for i, entry in enumerate(uvvis_entries):
                 try:
-                    uvvis_entries = get_specific_data_of_sample(
-                        sample_id=sample_id,
-                        entry_type='peroTF_UVvisMeasurement',
-                        nomad_url=url,
-                        token=token,
-                        with_meta=True
-                    )
+                    uvvis_data = entry["archive"]["data"]
+                    metadata = entry["archive"]["metadata"]
                     
-                    if not uvvis_entries:
-                        continue
-                    
-                    uvvis_data, metadata = uvvis_entries[0]
-                    
-                    # Extract measurements
+                    # Extract sample information
                     sample_name = metadata.get('entry_name', f'Sample_{i}')
                     batch_id = metadata.get('upload_id', 'unknown')
+                    entry_id = metadata.get('entry_id', 'unknown')
+                    
+                    # Get sample lab_id if available
+                    sample_id = entry_id
+                    if 'samples' in uvvis_data and uvvis_data['samples']:
+                        sample_id = uvvis_data['samples'][0].get('lab_id', entry_id)
                     
                     for measurement in uvvis_data.get("measurements", []):
                         measurement_data = {
@@ -128,6 +146,8 @@ class UVVisDataManager:
                             'measurement_name': measurement.get('name', 'unnamed'),
                             'wavelength': np.array(measurement.get('wavelength', [])),
                             'intensity': np.array(measurement.get('intensity', [])),
+                            'reflection': np.array(measurement.get('reflection', [])) if 'reflection' in measurement else None,
+                            'transmission': np.array(measurement.get('transmission', [])) if 'transmission' in measurement else None,
                             'metadata': metadata
                         }
                         all_measurements.append(measurement_data)
@@ -138,7 +158,7 @@ class UVVisDataManager:
                     failed_samples += 1
                     if output_widget:
                         with output_widget:
-                            print(f"   ⚠️ Skipped sample {sample_id}: {e}")
+                            print(f"   ⚠️ Skipped entry {i}: {e}")
             
             # Store data
             self.samples = all_measurements
@@ -151,9 +171,9 @@ class UVVisDataManager:
             if output_widget:
                 with output_widget:
                     print(f"\n✅ Data loaded successfully!")
-                    print(f"   • Successful samples: {successful_samples}")
+                    print(f"   • Successful entries: {successful_samples}")
                     if failed_samples > 0:
-                        print(f"   • Failed samples: {failed_samples}")
+                        print(f"   • Failed entries: {failed_samples}")
                     print(f"   • Total measurements: {len(all_measurements)}")
             
             return True
