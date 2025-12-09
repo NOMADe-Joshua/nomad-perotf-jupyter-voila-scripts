@@ -29,6 +29,23 @@ from uvvis_gui_components import UVVisAuthenticationUI, UVVisBatchSelector, UVVi
 from gui_components import ColorSchemeSelector  # From JV-Analysis
 from resizable_plot_utility import ResizablePlotManager  # From JV-Analysis
 
+# Import batch sorting utilities
+try:
+    from batch_selection import sort_by_date_desc
+except ImportError:
+    # Fallback if batch_selection.py not available
+    import re
+    def extract_date(s):
+        match = re.search(r'20\d{6}', s)
+        return int(match.group()) if match else None
+    
+    def sort_by_date_desc(data_list):
+        return sorted(
+            data_list,
+            key=lambda x: extract_date(x) if extract_date(x) else 0,
+            reverse=True
+        )
+
 
 class SimpleAuthManager:
     """Simplified authentication manager"""
@@ -171,6 +188,8 @@ class UVVisAnalysisApp:
         self.auth_ui.set_success_callback(self._on_auth_success)
         self.plot_ui.set_plot_callback(self._on_create_plots)
         self.save_ui.set_save_callbacks(self._on_save_plots, lambda b: None, self._on_save_all)
+        # NEW: filter button behavior
+        self.batch_selector.set_filter_callback(self._on_filter_batches)
     
     def _auto_authenticate(self):
         is_hub = bool(os.environ.get('JUPYTERHUB_USER'))
@@ -185,23 +204,50 @@ class UVVisAnalysisApp:
     def _init_batch_selection(self):
         """Initialize batch selection after authentication"""
         try:
-            from api_calls import get_user_batches
+            from api_calls import get_all_batches_wth_data
             url = self.auth_manager.url
             token = self.auth_manager.current_token
             
-            batches = get_user_batches(url, token)
-            # Only show upload name, store upload_id as value
-            batch_options = [(b.get('upload_name', 'Unnamed'), b['upload_id']) for b in batches]
+            # Get batch lab_ids that have UVVis data (matches JV-Analysis approach)
+            batch_lab_ids = get_all_batches_wth_data(url, token, 'peroTF_UVvisMeasurement')
+            
+            # Sort batches by date (newest first) using shared utility
+            batch_lab_ids_sorted = sort_by_date_desc(batch_lab_ids)
+            
+            # Display batch lab_ids directly (like JV-Analysis does)
+            batch_options = [(lab_id, lab_id) for lab_id in batch_lab_ids_sorted]
             self.batch_selector.set_options(batch_options)
             
         except Exception as e:
             with self.load_status_output:
                 print(f"❌ Error loading batches: {e}")
     
+    # NEW: filter to batches that actually have UVVis data (triggered by button)
+    def _on_filter_batches(self):
+        try:
+            from api_calls import get_all_batches_wth_data
+            url = self.auth_manager.url
+            token = self.auth_manager.current_token
+            if not self.auth_manager.is_authenticated():
+                with self.load_status_output:
+                    print("❌ Authentication required")
+                return
+            with self.load_status_output:
+                self.load_status_output.clear_output(wait=True)
+                print("🔍 Filtering batches for UVVis data...")
+            batch_lab_ids = get_all_batches_wth_data(url, token, 'peroTF_UVvisMeasurement')
+            batch_lab_ids_sorted = sort_by_date_desc(batch_lab_ids)
+            self.batch_selector.set_options([(lab_id, lab_id) for lab_id in batch_lab_ids_sorted])
+            with self.load_status_output:
+                print(f"✅ Found {len(batch_lab_ids_sorted)} batches with UVVis data")
+        except Exception as e:
+            with self.load_status_output:
+                print(f"❌ Error filtering batches: {e}")
+    
     def _load_data_from_selection(self, batch_selector):
-        batch_ids = list(batch_selector.value) if batch_selector.value else []
+        batch_lab_ids = list(batch_selector.value) if batch_selector.value else []
         
-        success = self.data_manager.load_batch_data(batch_ids, self.load_status_output)
+        success = self.data_manager.load_batch_data(batch_lab_ids, self.load_status_output)
         
         if success:
             with self.load_status_output:
@@ -215,40 +261,50 @@ class UVVisAnalysisApp:
             return
         
         measurements = self.data_manager.get_data()['samples']
-        plot_mode = self.plot_ui.get_plot_mode()
         colors = self.color_selector.get_colors(num_colors=len(measurements))
+        selected_modes = [mode for mode, enabled in self.plot_ui.get_selected_plot_modes() if enabled]
         
+        # Get x-axis setting (applies to all plots)
+        x_axis_mode = self.plot_ui.get_x_axis_mode()
+        
+        figs, names = [], []
         with self.plot_ui.plotted_content:
             clear_output(wait=True)
             print("🔄 Creating plots...")
         
         try:
-            # Handle different plot modes
-            if plot_mode == 'bandgap_derivative':
-                x_axis = self.plot_ui.get_x_axis_mode()
-                fig, name = self.plot_manager.create_bandgap_derivative_plot(
-                    measurements, colors, x_axis
+            if 'spectra_custom' in selected_modes:
+                layout_mode = self.plot_ui.get_layout_mode()
+                selected_channels = [c for c, enabled in self.plot_ui.get_selected_channels() if enabled]
+                if not selected_channels:
+                    raise ValueError("Select at least one channel (Reflection/Transmission/Absorption).")
+                spectra_figs, spectra_names = self.plot_manager.create_spectra_plot(
+                    measurements,
+                    color_scheme=colors,
+                    layout_mode=layout_mode,
+                    channels=selected_channels,
+                    x_axis=x_axis_mode  # NEW: Pass x_axis setting
                 )
-                figs = [fig]
-                names = [name]
-                
-            elif plot_mode == 'tauc_plot':
+                if not isinstance(spectra_figs, list):
+                    spectra_figs, spectra_names = [spectra_figs], [spectra_names]
+                figs += spectra_figs
+                names += spectra_names
+            if 'bandgap_derivative' in selected_modes:
+                fig, name = self.plot_manager.create_bandgap_derivative_plot(
+                    measurements, colors, x_axis_mode  # x_axis_mode already used here
+                )
+                figs.append(fig)
+                names.append(name)
+            if 'tauc_plot' in selected_modes:
                 thickness = self.plot_ui.get_thickness()
                 fig, name = self.plot_manager.create_tauc_plot(
                     measurements, colors, thickness
                 )
-                figs = [fig]
-                names = [name]
-                
-            else:
-                # Regular spectra plots
-                figs, names = self.plot_manager.create_spectra_plot(
-                    measurements, colors, plot_mode
-                )
+                figs.append(fig)
+                names.append(name)
             
-            if not isinstance(figs, list):
-                figs = [figs]
-                names = [names]
+            if not figs:
+                raise ValueError("No plot type selected.")
             
             self.global_plot_data = {'figs': figs, 'names': names}
             

@@ -4,9 +4,9 @@ Adds resizable containers to Plotly figures in Jupyter notebooks
 Copied from JV-Analysis for UVVis Analyzer.
 """
 
-__author__ = "Edgar Nandayapa (adapted for UVVis)"
-__institution__ = "Helmholtz-Zentrum Berlin / KIT"
-__created__ = "January 2025"
+__author__ = "Joshua Damm"
+__institution__ = "KIT"
+__created__ = "December 2025"
 
 import plotly.graph_objects as go
 import plotly.utils

@@ -19,15 +19,18 @@ if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
 try:
-    from api_calls import get_ids_in_batch, get_entryid
+    from api_calls import get_ids_in_batch, get_entryid, get_sample_description
 except ImportError:
     print("⚠️ Warning: API modules not available")
 
 
 def get_specific_data_of_sample(sample_id, entry_type, nomad_url, token, with_meta=False):
     """Get specific measurement data for a sample"""
-    entry_id = get_entryid([sample_id], nomad_url, token)['entry_id'][0]
-
+    try:
+        entry_id = get_entryid(nomad_url, token, sample_id)
+    except Exception:
+        return []
+    
     query = {
         'required': {
             'metadata': '*',
@@ -41,6 +44,7 @@ def get_specific_data_of_sample(sample_id, entry_type, nomad_url, token, with_me
     }
     response = requests.post(f'{nomad_url}/entries/archive/query',
                              headers={'Authorization': f'Bearer {token}'}, json=query)
+    response.raise_for_status()
     linked_data = response.json()["data"]
     res = []
 
@@ -63,8 +67,8 @@ class UVVisDataManager:
         self.samples = []
         self.measurements_df = None
     
-    def load_batch_data(self, batch_ids, output_widget=None):
-        """Load UVVis data from selected batch IDs (upload_ids)"""
+    def load_batch_data(self, batch_lab_ids, output_widget=None):
+        """Load UVVis data from selected batch lab_ids"""
         self.data = {}
         self.samples = []
         
@@ -74,7 +78,7 @@ class UVVisDataManager:
                     print("❌ Authentication required")
             return False
         
-        if not batch_ids:
+        if not batch_lab_ids:
             if output_widget:
                 with output_widget:
                     print("❌ Please select at least one batch")
@@ -87,69 +91,67 @@ class UVVisDataManager:
             if output_widget:
                 with output_widget:
                     print("🔍 Loading UVVis data...")
-                    print(f"   Batches: {batch_ids}")
+                    print(f"   Batches: {batch_lab_ids}")
             
-            # Query samples directly by upload_id instead of using get_ids_in_batch
-            # which expects batch lab_ids
-            query = {
-                'required': {
-                    'metadata': '*',
-                    'data': '*'
-                },
-                'owner': 'visible',
-                'query': {
-                    'upload_id:any': batch_ids,
-                    'entry_type': 'peroTF_UVvisMeasurement'
-                },
-                'pagination': {
-                    'page_size': 1000
-                }
-            }
-            
-            response = requests.post(
-                f'{url}/entries/archive/query',
-                headers={'Authorization': f'Bearer {token}'},
-                json=query
-            )
-            response.raise_for_status()
-            uvvis_entries = response.json()["data"]
+            # Get sample IDs from batch lab_ids (same approach as JV-Analysis)
+            sample_ids = get_ids_in_batch(url, token, batch_lab_ids)
             
             if output_widget:
                 with output_widget:
-                    print(f"   Found {len(uvvis_entries)} UVVis measurements")
+                    print(f"   Found {len(sample_ids)} samples")
             
-            # Load UVVis data from each entry
+            # Get sample descriptions/variations (same as JV-Analysis)
+            sample_descriptions = get_sample_description(url, token, sample_ids)
+            
+            # Load UVVis data for each sample
             all_measurements = []
             successful_samples = 0
             failed_samples = 0
             
-            for i, entry in enumerate(uvvis_entries):
+            for i, sample_id in enumerate(sample_ids):
                 try:
-                    uvvis_data = entry["archive"]["data"]
-                    metadata = entry["archive"]["metadata"]
+                    uvvis_entries = get_specific_data_of_sample(
+                        sample_id=sample_id,
+                        entry_type='peroTF_UVvisMeasurement',
+                        nomad_url=url,
+                        token=token,
+                        with_meta=True
+                    )
                     
-                    # Extract sample information
+                    if not uvvis_entries:
+                        continue
+                    
+                    uvvis_data, metadata = uvvis_entries[0]
+                    
+                    # Extract measurements
                     sample_name = metadata.get('entry_name', f'Sample_{i}')
                     batch_id = metadata.get('upload_id', 'unknown')
-                    entry_id = metadata.get('entry_id', 'unknown')
                     
-                    # Get sample lab_id if available
-                    sample_id = entry_id
-                    if 'samples' in uvvis_data and uvvis_data['samples']:
-                        sample_id = uvvis_data['samples'][0].get('lab_id', entry_id)
+                    # Get variation/condition from descriptions (like JV-Analysis)
+                    variation = sample_descriptions.get(sample_id, sample_id)
                     
                     for measurement in uvvis_data.get("measurements", []):
+                        # Extract bandgaps - CRITICAL FIX
+                        bandgaps_uvvis = measurement.get('bandgaps_uvvis', [])
+                        
+                        # DEBUG output
+                        if bandgaps_uvvis:
+                            print(f"DEBUG DataManager: Found bandgaps in measurement '{measurement.get('name')}': {bandgaps_uvvis}")
+                        
                         measurement_data = {
                             'sample_id': sample_id,
                             'sample_name': sample_name,
+                            'variation': variation,
                             'batch_id': batch_id,
                             'measurement_name': measurement.get('name', 'unnamed'),
                             'wavelength': np.array(measurement.get('wavelength', [])),
                             'intensity': np.array(measurement.get('intensity', [])),
                             'reflection': np.array(measurement.get('reflection', [])) if 'reflection' in measurement else None,
                             'transmission': np.array(measurement.get('transmission', [])) if 'transmission' in measurement else None,
+                            'bandgaps_uvvis': bandgaps_uvvis,  # CRITICAL: Ensure this is added
                             'metadata': metadata
                         }
+                        
                         all_measurements.append(measurement_data)
                     
                     successful_samples += 1
@@ -158,12 +160,12 @@ class UVVisDataManager:
                     failed_samples += 1
                     if output_widget:
                         with output_widget:
-                            print(f"   ⚠️ Skipped entry {i}: {e}")
+                            print(f"   ⚠️ Skipped sample {sample_id}: {e}")
             
             # Store data
             self.samples = all_measurements
             self.data['samples'] = all_measurements
-            self.data['batch_ids'] = batch_ids
+            self.data['batch_ids'] = batch_lab_ids
             
             # Create summary DataFrame
             self._create_summary_dataframe()
@@ -171,9 +173,9 @@ class UVVisDataManager:
             if output_widget:
                 with output_widget:
                     print(f"\n✅ Data loaded successfully!")
-                    print(f"   • Successful entries: {successful_samples}")
+                    print(f"   • Successful samples: {successful_samples}")
                     if failed_samples > 0:
-                        print(f"   • Failed entries: {failed_samples}")
+                        print(f"   • Failed samples: {failed_samples}")
                     print(f"   • Total measurements: {len(all_measurements)}")
             
             return True

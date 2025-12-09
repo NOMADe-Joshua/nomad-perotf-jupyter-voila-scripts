@@ -3,9 +3,9 @@ UVVis GUI Components Module
 Contains UI components for the UVVis Analysis Dashboard.
 """
 
-__author__ = "Adapted from JV Analysis"
-__institution__ = "Helmholtz-Zentrum Berlin / KIT"
-__created__ = "January 2025"
+__author__ = "Joshua Damm"
+__institution__ = "KIT"
+__created__ = "December 2025"
 
 import ipywidgets as widgets
 from IPython.display import display, clear_output, HTML
@@ -36,6 +36,7 @@ class UVVisBatchSelector:
     
     def __init__(self, callback):
         self.callback = callback
+        self.filter_callback = None  # NEW
         self._create_widgets()
     
     def _create_widgets(self):
@@ -51,17 +52,29 @@ class UVVisBatchSelector:
             button_style='success',
             layout=widgets.Layout(width='150px')
         )
+        # NEW: filter button to show only batches with UVVis data
+        self.filter_button = widgets.Button(
+            description='🔍 Filter UVVis Batches',
+            button_style='info',
+            layout=widgets.Layout(width='200px')
+        )
         
         self.load_button.on_click(lambda b: self.callback(self.batch_selector))
+        # NEW: wire filter button
+        self.filter_button.on_click(lambda b: self.filter_callback() if self.filter_callback else None)
         
         self.widget = widgets.VBox([
             widgets.HTML("<h3>Select Batches</h3>"),
             self.batch_selector,
-            self.load_button
+            widgets.HBox([self.load_button, self.filter_button])  # NEW
         ])
     
     def set_options(self, options):
         self.batch_selector.options = options
+    
+    # NEW: allow controller to set filter behavior
+    def set_filter_callback(self, callback):
+        self.filter_callback = callback
     
     def get_widget(self):
         return self.widget
@@ -75,34 +88,41 @@ class UVVisPlotUI:
     
     def _create_widgets(self):
         """Create widgets"""
-        self.plot_mode_radio = widgets.RadioButtons(
-            options=[
-                'Overlay (all in one)', 
-                'Grid (2x2 layout)', 
-                'Separate (one per sample)',
-                '🔬 Bandgap Analysis (Derivative)',  # NEW
-                '📊 Tauc Plot (Direct Bandgap)'      # NEW
-            ],
-            value='Overlay (all in one)',
-            description='Plot Mode:',
-            style={'description_width': 'initial'}
+        # Change plot mode to checkboxes for multi-selection
+        self.plot_mode_checks = widgets.VBox([
+            widgets.HTML("<b>Plot Types:</b>"),
+            widgets.Checkbox(value=True, description='Spectra (custom R/T/A)'),
+            widgets.Checkbox(value=False, description='🔬 Bandgap Analysis (Derivative)'),
+            widgets.Checkbox(value=False, description='📊 Tauc Plot (Direct Bandgap)')
+        ])
+        
+        self.layout_radio = widgets.RadioButtons(
+            options=['Overlay', 'Grid', 'Separate'],
+            value='Overlay',
+            description='Layout:',
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(margin='0 0 5px 0')
         )
         
-        # NEW: X-axis selection for bandgap analysis
+        self.channel_checks = widgets.VBox([
+            widgets.HTML("<b>Channels to plot:</b>"),
+            widgets.Checkbox(value=False, description='Reflection'),
+            widgets.Checkbox(value=False, description='Transmission'),
+            widgets.Checkbox(value=True,  description='Absorption')
+        ], layout=widgets.Layout(margin='0 0 10px 0'))
+        
         self.x_axis_radio = widgets.RadioButtons(
             options=['Photon Energy (eV)', 'Wavelength (nm)'],
             value='Photon Energy (eV)',
             description='X-Axis:',
             style={'description_width': 'initial'},
-            layout=widgets.Layout(display='none')  # Hidden by default
+            layout=widgets.Layout(display='none')
         )
-        
-        # NEW: Thickness input for Tauc plot
         self.thickness_input = widgets.FloatText(
             value=550,
             description='Thickness (nm):',
             style={'description_width': 'initial'},
-            layout=widgets.Layout(display='none', width='200px')  # Hidden by default
+            layout=widgets.Layout(display='none', width='200px')
         )
         
         self.plot_button = widgets.Button(
@@ -114,13 +134,16 @@ class UVVisPlotUI:
         self.plotted_content = widgets.Output()
         
         # Setup observer for plot mode changes
-        self.plot_mode_radio.observe(self._on_plot_mode_change, names='value')
+        for cb in self.plot_mode_checks.children[1:]:
+            cb.observe(self._on_plot_mode_change, names='value')
         
         self.widget = widgets.VBox([
             widgets.HTML("<h3>Plot Settings</h3>"),
-            self.plot_mode_radio,
-            self.x_axis_radio,       # NEW
-            self.thickness_input,     # NEW
+            self.plot_mode_checks,
+            self.layout_radio,
+            self.channel_checks,
+            self.x_axis_radio,
+            self.thickness_input,
             self.plot_button,
             widgets.HTML("<hr>"),
             widgets.HTML("<h3>Generated Plots</h3>"),
@@ -128,39 +151,39 @@ class UVVisPlotUI:
         ])
     
     def _on_plot_mode_change(self, change):
-        """Show/hide additional options based on plot mode"""
-        mode = change['new']
+        # Show/hide controls based on spectra checkbox
+        spectra_checked = self.plot_mode_checks.children[1].value
+        bandgap_checked = self.plot_mode_checks.children[2].value
+        tauc_checked = self.plot_mode_checks.children[3].value
         
-        if 'Bandgap Analysis' in mode:
-            self.x_axis_radio.layout.display = 'flex'
-            self.thickness_input.layout.display = 'none'
-        elif 'Tauc Plot' in mode:
-            self.x_axis_radio.layout.display = 'none'
-            self.thickness_input.layout.display = 'flex'
-        else:
-            self.x_axis_radio.layout.display = 'none'
-            self.thickness_input.layout.display = 'none'
+        self.layout_radio.layout.display = 'flex' if spectra_checked else 'none'
+        self.channel_checks.layout.display = 'flex' if spectra_checked else 'none'
+        self.x_axis_radio.layout.display = 'flex' if bandgap_checked else 'none'
+        self.thickness_input.layout.display = 'flex' if tauc_checked else 'none'
     
-    def get_plot_mode(self):
-        """Get plot mode"""
-        mode_map = {
-            'Overlay (all in one)': 'overlay',
-            'Grid (2x2 layout)': 'grid',
-            'Separate (one per sample)': 'separate',
-            '🔬 Bandgap Analysis (Derivative)': 'bandgap_derivative',
-            '📊 Tauc Plot (Direct Bandgap)': 'tauc_plot'
-        }
-        return mode_map.get(self.plot_mode_radio.value, 'overlay')
+    def get_selected_plot_modes(self):
+        checks = self.plot_mode_checks.children
+        return [
+            ('spectra_custom', checks[1].value),
+            ('bandgap_derivative', checks[2].value),
+            ('tauc_plot', checks[3].value)
+        ]
+    
+    def get_layout_mode(self):
+        return self.layout_radio.value.lower()
+    
+    def get_selected_channels(self):
+        checks = self.channel_checks.children
+        return [
+            ('reflection', checks[1].value),
+            ('transmission', checks[2].value),
+            ('absorption', checks[3].value)
+        ]
     
     def get_x_axis_mode(self):
-        """Get x-axis mode for bandgap analysis"""
-        if 'Energy' in self.x_axis_radio.value:
-            return 'energy'
-        else:
-            return 'wavelength'
+        return 'energy' if 'Energy' in self.x_axis_radio.value else 'wavelength'
     
     def get_thickness(self):
-        """Get thickness for Tauc plot"""
         return self.thickness_input.value
     
     def set_plot_callback(self, callback):
