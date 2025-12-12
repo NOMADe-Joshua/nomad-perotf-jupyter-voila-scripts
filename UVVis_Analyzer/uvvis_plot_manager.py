@@ -25,7 +25,14 @@ class UVVisPlotManager:
     def set_output_path(self, path):
         self.plot_output_path = path
     
-    def create_spectra_plot(self, measurements, color_scheme=None, layout_mode='overlay', channels=None, x_axis='wavelength'):
+    def _pick_color(self, color_map, color_scheme, variation, idx):
+        """Return color for a variation, fallback to cycling scheme."""
+        if color_map and variation in color_map:
+            return color_map[variation]
+        return color_scheme[idx % len(color_scheme)] if color_scheme else None
+
+    def create_spectra_plot(self, measurements, color_scheme=None, layout_mode='overlay',
+                            channels=None, x_axis='wavelength', color_map=None):
         """
         Create UV-Vis spectra plot with selectable channels (reflection/transmission/absorption)
         
@@ -62,11 +69,11 @@ class UVVisPlotManager:
             return fig, "uvvis_spectra_empty.html"
         
         if layout_mode == 'overlay':
-            return self._create_overlay_plot(filtered_measurements, color_scheme, channels, x_axis)
+            return self._create_overlay_plot(filtered_measurements, color_scheme, channels, x_axis, color_map)
         elif layout_mode == 'grid':
-            return self._create_grid_plot(filtered_measurements, color_scheme, channels, x_axis)
+            return self._create_grid_plot(filtered_measurements, color_scheme, channels, x_axis, color_map)
         else:
-            return self._create_separate_plots(filtered_measurements, color_scheme, channels, x_axis)
+            return self._create_separate_plots(filtered_measurements, color_scheme, channels, x_axis, color_map)
     
     def _resolve_series(self, measurement, channel):
         """Return (y, legend_channel) for a channel, or (None, None) if unavailable."""
@@ -87,7 +94,7 @@ class UVVisPlotManager:
                 return measurement['intensity'], 'absorption'
         return None, None
     
-    def create_bandgap_derivative_plot(self, measurements, colors=None, x_axis='energy'):
+    def create_bandgap_derivative_plot(self, measurements, colors=None, x_axis='energy', color_map=None):
         """
         Create bandgap determination plot using derivative method
         Shows ONLY the derivative of absorption, not the absorption itself
@@ -125,7 +132,7 @@ class UVVisPlotManager:
                 wavelength = measurement['wavelength']
                 intensity = measurement['intensity']
                 name = measurement.get('variation', measurement['sample_name'])
-                color = colors[i % len(colors)]
+                color = self._pick_color(color_map, colors, name, i)
                 
                 # Extract bandgaps if available - with debug output
                 bandgaps_uvvis = measurement.get('bandgaps_uvvis', [])
@@ -190,7 +197,7 @@ class UVVisPlotManager:
                         name=legend_label,
                         line=dict(color=color, width=2),
                         showlegend=True,
-                        hovertemplate='λ: %{x:.1f} nm<br>d(A)/dλ: %{y:.4f}<extra></extra>'
+                        hovertemplate=f'<b>{name}</b><br>λ: %{{x:.1f}} nm<br>d(A)/dλ: %{{y:.4f}}<extra></extra>'
                     ))
                     
                     # Add bandgap markers (hidden from legend)
@@ -204,7 +211,7 @@ class UVVisPlotManager:
                             mode='lines',
                             line=dict(color=color, dash='dot'),
                             showlegend=False,
-                            hovertemplate=f'Bandgap: {bandgap_energy:.2f} eV<extra></extra>'
+                            hovertemplate=f'<b>{name}</b><br>Bandgap: {bandgap_energy:.2f} eV<extra></extra>'
                         ))
                         
                         fig.add_vline(x=lambda_bg, line_dash="dash", line_color=color,
@@ -221,7 +228,7 @@ class UVVisPlotManager:
                         name=legend_label,
                         line=dict(color=color, width=2),
                         showlegend=True,
-                        hovertemplate='E: %{x:.3f} eV<br>d(A)/dE: %{y:.4f}<extra></extra>'
+                        hovertemplate=f'<b>{name}</b><br>E: %{{x:.3f}} eV<br>d(A)/dE: %{{y:.4f}}<extra></extra>'
                     ))
                     
                     # Add bandgap markers and Gaussian fits (hidden from legend)
@@ -232,7 +239,7 @@ class UVVisPlotManager:
                             mode='lines',
                             line=dict(color=color, dash='dot'),
                             showlegend=False,
-                            hovertemplate=f'Bandgap: {bandgap_energy:.2f} eV<extra></extra>'
+                            hovertemplate=f'<b>{name}</b><br>Bandgap: {bandgap_energy:.2f} eV<extra></extra>'
                         ))
                         
                         fig.add_vline(x=bandgap_energy, line_dash="dash", line_color=color,
@@ -258,7 +265,7 @@ class UVVisPlotManager:
         filename = f"uvvis_bandgap_derivative_{x_axis}.html"
         return fig, filename
     
-    def create_tauc_plot(self, measurements, colors=None, thickness_nm=550):
+    def create_tauc_plot(self, measurements, colors=None, thickness_nm=550, color_map=None):
         """
         Create Tauc plot for direct bandgap determination
         
@@ -276,55 +283,82 @@ class UVVisPlotManager:
             colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
         
         fig = go.Figure()
+        messages = []  # collected user-facing diagnostics
+        traces_added = 0
         
         for i, measurement in enumerate(measurements):
             try:
-                wavelength = measurement['wavelength']
-                
+                wavelength = np.asarray(measurement['wavelength'])
+                name = measurement.get('variation', measurement['sample_name'])
+
                 # Check if reflection/transmission data available
                 if 'reflection' not in measurement or 'transmission' not in measurement:
-                    print(f"Warning: No reflection/transmission data for {measurement['sample_name']}, skipping Tauc plot")
+                    messages.append(f"{name}: missing reflection/transmission data")
                     continue
                 
-                reflection = measurement['reflection']
-                transmission = measurement['transmission']
-                
-                # Calculate absorption coefficient
-                # alpha = 1/d * ln((1-R)^2 / T)
-                alpha = (1 / thickness_nm) * np.log((1 - reflection)**2 / transmission)
-                
-                # Convert to photon energy
+                reflection = np.asarray(measurement['reflection'])
+                transmission = np.asarray(measurement['transmission'])
+
+                # Validate input lengths
+                if len(wavelength) == 0 or len(reflection) == 0 or len(transmission) == 0:
+                    messages.append(f"{name}: empty wavelength/reflection/transmission arrays")
+                    continue
+
+                # Calculate absorption coefficient safely
+                numerator = (1 - reflection) ** 2
+                valid_mask = np.isfinite(numerator) & np.isfinite(transmission) & (transmission > 0) & (numerator > 0)
+                if valid_mask.sum() < 5:
+                    messages.append(f"{name}: not enough valid reflection/transmission points for Tauc plot")
+                    continue
+
+                wavelength = wavelength[valid_mask]
+                numerator = numerator[valid_mask]
+                transmission = transmission[valid_mask]
+                ratio = numerator / transmission
+                ratio = np.where(ratio > 0, ratio, 1e-12)
+                alpha = (1 / thickness_nm) * np.log(ratio)
+
+                # Convert to photon energy and Tauc variable
                 photon_energy = 1239.841984 / wavelength
-                
-                # Calculate Tauc variable: (alpha * hv)^2
                 tauc = (alpha * photon_energy) ** 2
-                
+
                 # Sort by energy
                 sorted_indices = np.argsort(photon_energy)
                 energy_sorted = photon_energy[sorted_indices]
                 tauc_sorted = tauc[sorted_indices]
-                
-                # Smooth data
-                tauc_smooth = savgol_filter(tauc_sorted, 51, 3)
-                
+
+                if len(energy_sorted) < 5:
+                    messages.append(f"{name}: insufficient points after sorting for Tauc plot")
+                    continue
+
+                # Smooth data with a valid odd window <= length
+                window_length = min(51, len(tauc_sorted) if len(tauc_sorted) % 2 == 1 else len(tauc_sorted) - 1)
+                if window_length < 3:
+                    if len(tauc_sorted) >= 3:
+                        window_length = 3
+                    else:
+                        messages.append(f"{name}: too few points for smoothing")
+                        continue
+                tauc_smooth = savgol_filter(tauc_sorted, window_length, 3)
+
                 # Find best fit
                 fit_result = self._find_best_tauc_fit(energy_sorted, tauc_smooth)
-                
-                color = colors[i % len(colors)]
-                # Use variation instead of sample_name
-                name = measurement.get('variation', measurement['sample_name'])
-                
+
+                color = self._pick_color(color_map, colors, name, i)
+
                 if fit_result is None:
                     label = f"{name} (no fit)"
-                    
+
                     fig.add_trace(go.Scatter(
                         x=energy_sorted,
                         y=tauc_sorted,
                         mode='lines',
                         name=label,
                         line=dict(color=color, width=2, dash='dot'),
-                        opacity=0.5
+                        opacity=0.5,
+                        hovertemplate=f'<b>{name}</b><br>Energy: %{{x:.3f}} eV<br>Tauc: %{{y:.4f}}<extra></extra>'
                     ))
+                    traces_added += 1
                 else:
                     bandgap = fit_result['bandgap']
                     r2 = fit_result['r2']
@@ -337,7 +371,8 @@ class UVVisPlotManager:
                         mode='lines',
                         name=label,
                         line=dict(color=color, width=2),
-                        opacity=0.7
+                        opacity=0.7,
+                        hovertemplate=f'<b>{name}</b><br>Energy: %{{x:.3f}} eV<br>Tauc: %{{y:.4f}}<extra></extra>'
                     ))
                     
                     # Plot fit line
@@ -364,13 +399,22 @@ class UVVisPlotManager:
                         mode='markers',
                         marker=dict(color=color, size=10, symbol='circle'),
                         showlegend=False,
-                        hovertemplate=f'Bandgap: {bandgap:.2f} eV<extra></extra>'
+                        hovertemplate=f'<b>{name}</b><br>Bandgap: {bandgap:.2f} eV<extra></extra>'
                     ))
+                    traces_added += 1
             
-            except Exception as e:
-                print(f"Error processing Tauc plot for {measurement['sample_name']}: {e}")
+            except Exception:
+                messages.append(f"{measurement.get('sample_name', 'Unknown')}: failed to process Tauc plot")
                 continue
-        
+
+        # If no traces were added, provide an on-plot message so Voila users see feedback
+        if traces_added == 0:
+            info = "; ".join(messages) if messages else "No valid data points for Tauc plot"
+            fig.add_annotation(text=f"No Tauc data to display. {info}",
+                               xref="paper", yref="paper",
+                               x=0.5, y=0.5, showarrow=False,
+                               font=dict(color="red"))
+
         fig.update_layout(
             title=f'Tauc Plot (Direct Bandgap, thickness={thickness_nm} nm)',
             xaxis_title='Photon Energy [eV]',
@@ -468,7 +512,7 @@ class UVVisPlotManager:
 
         return best_fit
     
-    def _create_overlay_plot(self, measurements, color_scheme, channels, x_axis='wavelength'):
+    def _create_overlay_plot(self, measurements, color_scheme, channels, x_axis='wavelength', color_map=None):
         fig = go.Figure()
         for i, measurement in enumerate(measurements):
             wavelength = measurement['wavelength']
@@ -480,7 +524,7 @@ class UVVisPlotManager:
             if y is None or len(y) == 0:
                 continue
                 
-            color = color_scheme[i % len(color_scheme)]
+            color = self._pick_color(color_map, color_scheme, display_name, i)
             
             # Abbreviate channel names: reflection->R, transmission->T, absorption->A
             channel_abbrev = ''
@@ -509,7 +553,7 @@ class UVVisPlotManager:
                 mode='lines',
                 name=legend_label,
                 line=dict(color=color, width=2),
-                hovertemplate=f'{x_title}: %{{x:.2f}}<br>Value: %{{y:.4f}}<extra></extra>'
+                hovertemplate=f'<b>{display_name}</b><br>{x_title}: %{{x:.2f}}<br>Value: %{{y:.4f}}<extra></extra>'
             ))
         fig.update_layout(
             title='UV-Vis Spectra',
@@ -525,7 +569,7 @@ class UVVisPlotManager:
         fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
         return fig, "uvvis_overlay_spectra.html"
 
-    def _create_grid_plot(self, measurements, color_scheme, channels, x_axis='wavelength'):
+    def _create_grid_plot(self, measurements, color_scheme, channels, x_axis='wavelength', color_map=None):
         num_measurements = len(measurements)
         cols = 2
         rows = (num_measurements + cols - 1) // cols
@@ -541,7 +585,7 @@ class UVVisPlotManager:
             wavelength = measurement['wavelength']
             display_name = measurement.get('variation', measurement['sample_name'])
             meas_name = measurement['measurement_name']
-            color = color_scheme[i % len(color_scheme)]
+            color = self._pick_color(color_map, color_scheme, display_name, i)
             
             y = measurement.get('intensity')
             if y is None or len(y) == 0:
@@ -574,7 +618,7 @@ class UVVisPlotManager:
                 name=legend_label,
                 line=dict(color=color, width=2),
                 showlegend=True,
-                hovertemplate=f'{x_title}: %{{x:.2f}}<br>Value: %{{y:.4f}}<extra></extra>'
+                hovertemplate=f'<b>{display_name}</b><br>{x_title}: %{{x:.2f}}<br>Value: %{{y:.4f}}<extra></extra>'
             ), row=row, col=col)
         fig.update_xaxes(title_text=x_title if x_axis == 'energy' else "Wavelength [nm]", showgrid=True)
         fig.update_yaxes(title_text="Value", showgrid=True)
@@ -587,14 +631,14 @@ class UVVisPlotManager:
         )
         return fig, "uvvis_grid_spectra.html"
 
-    def _create_separate_plots(self, measurements, color_scheme, channels, x_axis='wavelength'):
+    def _create_separate_plots(self, measurements, color_scheme, channels, x_axis='wavelength', color_map=None):
         figs, names = [], []
         for i, measurement in enumerate(measurements):
             fig = go.Figure()
             wavelength = measurement['wavelength']
             display_name = measurement.get('variation', measurement['sample_name'])
             meas_name = measurement['measurement_name']
-            color = color_scheme[i % len(color_scheme)]
+            color = self._pick_color(color_map, color_scheme, display_name, i)
             
             y = measurement.get('intensity')
             if y is None or len(y) == 0:
@@ -626,7 +670,7 @@ class UVVisPlotManager:
                 mode='lines',
                 name=legend_label,
                 line=dict(color=color, width=2),
-                hovertemplate=f'{x_title}: %{{x:.2f}}<br>Value: %{{y:.4f}}<extra></extra>'
+                hovertemplate=f'<b>{display_name}</b><br>{x_title}: %{{x:.2f}}<br>Value: %{{y:.4f}}<extra></extra>'
             ))
             fig.update_layout(
                 title=f"{display_name} - {meas_name}",
@@ -720,302 +764,3 @@ class UVVisPlotManager:
                         }
 
         return best_fit
-    
-    def create_bandgap_derivative_plot(self, measurements, colors=None, x_axis='energy'):
-        """
-        Create bandgap determination plot using derivative method
-        Shows ONLY the derivative of absorption, not the absorption itself
-        
-        Args:
-            measurements: List of measurement dictionaries
-            colors: Color scheme
-            x_axis: 'energy' or 'wavelength'
-        """
-        if not measurements:
-            fig = go.Figure()
-            fig.update_layout(title="No data available")
-            return fig, "uvvis_bandgap_derivative.html"
-        
-        if colors is None:
-            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
-        
-        # Filter to only include absorption measurements
-        absorption_measurements = []
-        for measurement in measurements:
-            meas_name_lower = measurement['measurement_name'].lower()
-            if 'absorption' in meas_name_lower:
-                absorption_measurements.append(measurement)
-        
-        if not absorption_measurements:
-            fig = go.Figure()
-            fig.update_layout(title="No absorption measurements available for bandgap analysis")
-            return fig, "uvvis_bandgap_derivative.html"
-        
-        # Create single plot for derivative only
-        fig = go.Figure()
-        
-        for i, measurement in enumerate(absorption_measurements):
-            try:
-                wavelength = measurement['wavelength']
-                intensity = measurement['intensity']
-                name = measurement.get('variation', measurement['sample_name'])
-                color = colors[i % len(colors)]
-                
-                # Extract bandgaps if available - with debug output
-                bandgaps_uvvis = measurement.get('bandgaps_uvvis', [])
-                
-                # DEBUG: Check if bandgaps exist
-                if bandgaps_uvvis:
-                    print(f"DEBUG Plot: bandgaps_uvvis = {bandgaps_uvvis}, type = {type(bandgaps_uvvis)}")
-                else:
-                    print(f"DEBUG Plot: No bandgaps found for {name}")
-                
-                # Handle different data types
-                if bandgaps_uvvis and isinstance(bandgaps_uvvis, (list, tuple)):
-                    if len(bandgaps_uvvis) > 0:
-                        # Check if elements are numbers or need conversion
-                        try:
-                            bandgap_values = [float(bg) if bg is not None else None for bg in bandgaps_uvvis]
-                            bandgap_values = [bg for bg in bandgap_values if bg is not None]
-                            
-                            if bandgap_values:
-                                bandgap_str = ", ".join([f"{bg:.2f} eV" for bg in bandgap_values])
-                                legend_label = f"{name}<br>Bandgaps (NOMAD): {bandgap_str}"
-                            else:
-                                legend_label = name
-                        except (TypeError, ValueError) as e:
-                            print(f"DEBUG: Error converting bandgaps: {e}, value was: {bandgaps_uvvis}")
-                            legend_label = name
-                    else:
-                        legend_label = name
-                else:
-                    legend_label = name
-                
-                # Convert to photon energy
-                photon_energy = 1239.841984 / wavelength
-                
-                # Sort by energy
-                sorted_indices = np.argsort(photon_energy)
-                energy_sorted = photon_energy[sorted_indices]
-                absorption_sorted = intensity[sorted_indices]
-                
-                # Interpolate and smooth
-                energy_range = np.linspace(energy_sorted.min(), energy_sorted.max(), 1001)
-                spline = CubicSpline(energy_sorted, absorption_sorted)
-                interpolated_absorption = spline(energy_range)
-                smoothed_absorption = savgol_filter(interpolated_absorption, window_length=101, polyorder=3)
-                derivative = np.gradient(smoothed_absorption, energy_range)
-                
-                # Find bandgap peaks from derivative
-                peaks_result = self._find_peaks_and_fit_gaussian(energy_range, derivative)
-                
-                if x_axis == 'wavelength':
-                    # Convert back to wavelength
-                    wavelength_range = 1239.841984 / energy_range[::-1]
-                    derivative = derivative[::-1]
-                    
-                    x_smooth = wavelength_range
-                    x_label = 'Wavelength [nm]'
-                    
-                    # Add derivative trace with legend
-                    fig.add_trace(go.Scatter(
-                        x=x_smooth, y=derivative,
-                        mode='lines',
-                        name=legend_label,
-                        line=dict(color=color, width=2),
-                        showlegend=True,
-                        hovertemplate='λ: %{x:.1f} nm<br>d(A)/dλ: %{y:.4f}<extra></extra>'
-                    ))
-                    
-                    # Add bandgap markers (hidden from legend)
-                    for bandgap_energy, popt, fitting_range in peaks_result:
-                        lambda_bg = 1239.841984 / bandgap_energy
-                        lambda_fit = 1239.841984 / energy_range[fitting_range][::-1]
-                        
-                        fig.add_trace(go.Scatter(
-                            x=lambda_fit,
-                            y=self._gaussian(energy_range[fitting_range], *popt)[::-1],
-                            mode='lines',
-                            line=dict(color=color, dash='dot'),
-                            showlegend=False,
-                            hovertemplate=f'Bandgap: {bandgap_energy:.2f} eV<extra></extra>'
-                        ))
-                        
-                        fig.add_vline(x=lambda_bg, line_dash="dash", line_color=color,
-                                     annotation_text=f"{bandgap_energy:.2f} eV")
-                    
-                else:  # x_axis == 'energy'
-                    x_smooth = energy_range
-                    x_label = 'Photon Energy [eV]'
-                    
-                    # Add derivative trace with legend
-                    fig.add_trace(go.Scatter(
-                        x=x_smooth, y=derivative,
-                        mode='lines',
-                        name=legend_label,
-                        line=dict(color=color, width=2),
-                        showlegend=True,
-                        hovertemplate='E: %{x:.3f} eV<br>d(A)/dE: %{y:.4f}<extra></extra>'
-                    ))
-                    
-                    # Add bandgap markers and Gaussian fits (hidden from legend)
-                    for bandgap_energy, popt, fitting_range in peaks_result:
-                        fig.add_trace(go.Scatter(
-                            x=energy_range[fitting_range],
-                            y=self._gaussian(energy_range[fitting_range], *popt),
-                            mode='lines',
-                            line=dict(color=color, dash='dot'),
-                            showlegend=False,
-                            hovertemplate=f'Bandgap: {bandgap_energy:.2f} eV<extra></extra>'
-                        ))
-                        
-                        fig.add_vline(x=bandgap_energy, line_dash="dash", line_color=color,
-                                     annotation_text=f"{bandgap_energy:.2f} eV")
-            
-            except Exception as e:
-                print(f"Error processing {measurement['sample_name']}: {e}")
-                continue
-        
-        # Update layout
-        fig.update_xaxes(title_text=x_label, showgrid=True)
-        fig.update_yaxes(title_text='d(Absorption)/dE', showgrid=True)
-        
-        fig.update_layout(
-            title='UVVis Bandgap Determination (Derivative of Absorption)',
-            template="plotly_white",
-            width=1200,
-            height=700,
-            hovermode='closest',
-            legend=dict(x=0.02, y=0.98, bgcolor="rgba(255,255,255,0.85)", bordercolor="black", borderwidth=1)
-        )
-        
-        filename = f"uvvis_bandgap_derivative_{x_axis}.html"
-        return fig, filename
-    
-    def create_tauc_plot(self, measurements, colors=None, thickness_nm=550):
-        """
-        Create Tauc plot for direct bandgap determination
-        
-        Args:
-            measurements: List of measurement dictionaries (must include reflection/transmission)
-            colors: Color scheme
-            thickness_nm: Film thickness in nanometers
-        """
-        if not measurements:
-            fig = go.Figure()
-            fig.update_layout(title="No data available")
-            return fig, "uvvis_tauc_plot.html"
-        
-        if colors is None:
-            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
-        
-        fig = go.Figure()
-        
-        for i, measurement in enumerate(measurements):
-            try:
-                wavelength = measurement['wavelength']
-                
-                # Check if reflection/transmission data available
-                if 'reflection' not in measurement or 'transmission' not in measurement:
-                    print(f"Warning: No reflection/transmission data for {measurement['sample_name']}, skipping Tauc plot")
-                    continue
-                
-                reflection = measurement['reflection']
-                transmission = measurement['transmission']
-                
-                # Calculate absorption coefficient
-                # alpha = 1/d * ln((1-R)^2 / T)
-                alpha = (1 / thickness_nm) * np.log((1 - reflection)**2 / transmission)
-                
-                # Convert to photon energy
-                photon_energy = 1239.841984 / wavelength
-                
-                # Calculate Tauc variable: (alpha * hv)^2
-                tauc = (alpha * photon_energy) ** 2
-                
-                # Sort by energy
-                sorted_indices = np.argsort(photon_energy)
-                energy_sorted = photon_energy[sorted_indices]
-                tauc_sorted = tauc[sorted_indices]
-                
-                # Smooth data
-                tauc_smooth = savgol_filter(tauc_sorted, 51, 3)
-                
-                # Find best fit
-                fit_result = self._find_best_tauc_fit(energy_sorted, tauc_smooth)
-                
-                color = colors[i % len(colors)]
-                # Use variation instead of sample_name
-                name = measurement.get('variation', measurement['sample_name'])
-                
-                if fit_result is None:
-                    label = f"{name} (no fit)"
-                    
-                    fig.add_trace(go.Scatter(
-                        x=energy_sorted,
-                        y=tauc_sorted,
-                        mode='lines',
-                        name=label,
-                        line=dict(color=color, width=2, dash='dot'),
-                        opacity=0.5
-                    ))
-                else:
-                    bandgap = fit_result['bandgap']
-                    r2 = fit_result['r2']
-                    label = f"{name} (Eg = {bandgap:.2f} eV, R² = {r2:.3f})"
-                    
-                    # Plot data
-                    fig.add_trace(go.Scatter(
-                        x=energy_sorted,
-                        y=tauc_sorted,
-                        mode='lines',
-                        name=label,
-                        line=dict(color=color, width=2),
-                        opacity=0.7
-                    ))
-                    
-                    # Plot fit line
-                    x_fit = fit_result['x_fit']
-                    slope = fit_result['slope']
-                    intercept = fit_result['intercept']
-                    
-                    max_index = np.where(energy_sorted >= x_fit[-1])[0][0]
-                    x_line = np.linspace(bandgap, energy_sorted[max_index], 100)
-                    y_line = slope * x_line + intercept
-                    
-                    fig.add_trace(go.Scatter(
-                        x=x_line,
-                        y=y_line,
-                        mode='lines',
-                        line=dict(color=color, dash='dash', width=2),
-                        showlegend=False
-                    ))
-                    
-                    # Mark bandgap
-                    fig.add_trace(go.Scatter(
-                        x=[bandgap],
-                        y=[0],
-                        mode='markers',
-                        marker=dict(color=color, size=10, symbol='circle'),
-                        showlegend=False,
-                        hovertemplate=f'Bandgap: {bandgap:.2f} eV<extra></extra>'
-                    ))
-            
-            except Exception as e:
-                print(f"Error processing Tauc plot for {measurement['sample_name']}: {e}")
-                continue
-        
-        fig.update_layout(
-            title=f'Tauc Plot (Direct Bandgap, thickness={thickness_nm} nm)',
-            xaxis_title='Photon Energy [eV]',
-            yaxis_title='(αhν)² [a.u.]',
-            template="plotly_white",
-            width=1200,
-            height=800,
-            hovermode='closest'
-        )
-        
-        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
-        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
-        
-        return fig, "uvvis_tauc_plot.html"

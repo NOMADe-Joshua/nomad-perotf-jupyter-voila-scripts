@@ -246,7 +246,7 @@ class SaveUI:
 
 
 class ColorSchemeSelector:
-    """Color scheme selector with preview - copied from JV-Analysis"""
+    """Color scheme selector with preview and dynamic color generation - copied from JV-Analysis"""
     
     def __init__(self):
         import plotly.express as px
@@ -269,6 +269,7 @@ class ColorSchemeSelector:
         }
         
         self.selected_scheme = 'Default (Current)'
+        self.num_colors = 6  # NEW: User can specify number of colors
         self._create_widgets()
     
     def _create_widgets(self):
@@ -280,39 +281,200 @@ class ColorSchemeSelector:
             style={'description_width': 'initial'}
         )
         
+        # NEW: Slider to select number of colors
+        self.num_colors_slider = widgets.IntSlider(
+            value=6,
+            min=2,
+            max=20,
+            step=1,
+            description='# Colors:',
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(width='300px')
+        )
+        
         self.preview_output = widgets.Output()
         self.color_dropdown.observe(self._on_color_change, names='value')
+        self.num_colors_slider.observe(self._on_num_colors_change, names='value')  # NEW
         self._update_preview()
         
-        self.widget = widgets.HBox([self.color_dropdown, self.preview_output])
+        # NEW: Reorganized layout with slider
+        self.widget = widgets.VBox([
+            widgets.HBox([self.color_dropdown, self.num_colors_slider]),
+            self.preview_output
+        ])
     
     def _on_color_change(self, change):
         """Handle color change"""
         self.selected_scheme = change['new']
         self._update_preview()
     
+    # NEW: Handle number of colors change
+    def _on_num_colors_change(self, change):
+        """Handle number of colors change"""
+        self.num_colors = change['new']
+        self._update_preview()
+    
     def _update_preview(self):
         """Update preview"""
         with self.preview_output:
             clear_output(wait=True)
-            colors = self.color_schemes[self.selected_scheme][:8]
-            html = '<div style="display: flex;">'
+            colors = self.get_colors(num_colors=self.num_colors)
+            
+            # NEW: Show number of colors being used
+            html = f'<p style="margin: 5px 0; font-size: 12px; color: #666;">Generating {len(colors)} colors</p>'
+            html += '<div style="display: flex; flex-wrap: wrap;">'
             for color in colors:
-                html += f'<span style="background-color: {color}; width: 30px; height: 30px; display: inline-block; margin: 2px;"></span>'
+                html += f'<span style="background-color: {color}; width: 40px; height: 30px; display: inline-block; margin: 2px; border: 1px solid #ccc;"></span>'
             html += '</div>'
             display(HTML(html))
     
-    def get_colors(self, num_colors=None):
-        """Get colors from selected scheme"""
-        colors = self.color_schemes[self.selected_scheme]
-        if num_colors is None or num_colors <= len(colors):
-            return colors[:num_colors] if num_colors else colors
+    def _interpolate_color(self, hex_color1, hex_color2, factor):
+        """
+        NEW: Interpolate between two colors (supports both hex and rgba formats)
+        factor: 0.0 = color1, 1.0 = color2
+        """
+        # Convert hex to RGB
+        def hex_to_rgb(color):
+            """Convert color from hex or rgba format to RGB tuple"""
+            if isinstance(color, str):
+                # Handle rgba(r, g, b, a) format
+                if color.startswith('rgba'):
+                    # Extract RGBA values: rgba(93, 164, 214, 0.7)
+                    import re
+                    match = re.match(r'rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)', color)
+                    if match:
+                        r, g, b, a = match.groups()
+                        return (int(r) / 255.0, int(g) / 255.0, int(b) / 255.0)
+                
+                # Handle hex format: #RRGGBB
+                color = color.lstrip('#')
+                if len(color) >= 6:
+                    return tuple(int(color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+            
+            # Fallback: return neutral color if parsing fails
+            return (0.5, 0.5, 0.5)
+        
+        # Convert RGB to hex
+        def rgb_to_hex(r, g, b):
+            return '#{:02x}{:02x}{:02x}'.format(int(r*255), int(g*255), int(b*255))
+        
+        rgb1 = hex_to_rgb(hex_color1)
+        rgb2 = hex_to_rgb(hex_color2)
+        
+        # Linear interpolation
+        r = rgb1[0] + (rgb2[0] - rgb1[0]) * factor
+        g = rgb1[1] + (rgb2[1] - rgb1[1]) * factor
+        b = rgb1[2] + (rgb2[2] - rgb1[2]) * factor
+        
+        return rgb_to_hex(r, g, b)
+    
+    def _generate_continuous_colors(self, num_colors):
+        """
+        NEW: Generate smooth color gradient from continuous palette
+        
+        Args:
+            num_colors: Number of colors to generate
+        
+        Returns:
+            List of hex colors evenly distributed across the palette
+        """
+        # Get base palette for the selected scheme
+        base_palette = self.color_schemes[self.selected_scheme]
+        
+        if num_colors <= len(base_palette):
+            # If requested colors <= available colors, just select evenly
+            step = (len(base_palette) - 1) / (num_colors - 1) if num_colors > 1 else 0
+            # NEW: Ensure all colors are converted to hex format
+            selected_colors = [base_palette[int(i * step)] for i in range(num_colors)]
+            return [self._ensure_hex_format(color) for color in selected_colors]
         else:
-            return [colors[i % len(colors)] for i in range(num_colors)]
+            # If requested colors > available colors, interpolate between palette colors
+            colors = []
+            
+            for i in range(num_colors):
+                # Position in the palette (0.0 to 1.0)
+                position = i / (num_colors - 1) if num_colors > 1 else 0
+                
+                # Map position to base palette
+                palette_index = position * (len(base_palette) - 1)
+                lower_index = int(palette_index)
+                upper_index = min(lower_index + 1, len(base_palette) - 1)
+                
+                # Interpolation factor between the two neighboring palette colors
+                factor = palette_index - lower_index
+                
+                # Get the two colors from palette
+                color1 = base_palette[lower_index]
+                color2 = base_palette[upper_index]
+                
+                # Interpolate between them
+                if factor == 0 or lower_index == upper_index:
+                    interpolated = self._ensure_hex_format(color1)
+                else:
+                    interpolated = self._interpolate_color(color1, color2, factor)
+                
+                colors.append(interpolated)
+            
+            return colors
+    
+    # NEW: Helper method to ensure color is in hex format
+    def _ensure_hex_format(self, color):
+        """
+        Convert color to hex format if it's in rgba format
+        
+        Args:
+            color: Color string (hex or rgba format)
+        
+        Returns:
+            Color in hex format (#RRGGBB)
+        """
+        if isinstance(color, str):
+            # Already hex format
+            if color.startswith('#'):
+                return color
+            
+            # Convert rgba format to hex
+            if color.startswith('rgba'):
+                import re
+                match = re.match(r'rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)', color)
+                if match:
+                    r, g, b, a = match.groups()
+                    return '#{:02x}{:02x}{:02x}'.format(int(r), int(g), int(b))
+        
+        # Fallback: return gray if conversion fails
+        return '#808080'
+    
+    def get_colors(self, num_colors=None):
+        """Get colors from selected scheme
+        
+        Args:
+            num_colors: Number of colors to generate (if None, uses slider value)
+        
+        Returns:
+            List of hex colors
+        """
+        if num_colors is None:
+            num_colors = self.num_colors
+        
+        # NEW: Use continuous color generation for all palettes
+        return self._generate_continuous_colors(num_colors)
     
     def get_widget(self):
         """Get widget"""
         return widgets.VBox([
             widgets.HTML("<h4>Color Scheme Selection</h4>"),
+            widgets.HTML("<p style='font-size: 12px; color: #666;'>Select a palette and adjust the number of colors. Continuous palettes will generate smooth gradients.</p>"),
             self.widget
         ])
+    
+    # NEW: Method to programmatically set number of colors
+    def set_num_colors(self, num_colors):
+        """
+        Set the number of colors to generate
+        
+        Args:
+            num_colors: Number of colors (will be clamped to 2-20)
+        """
+        num_colors = max(2, min(20, num_colors))  # Clamp to valid range
+        self.num_colors_slider.value = num_colors
+        # Preview will update automatically via the observer

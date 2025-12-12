@@ -252,7 +252,30 @@ class UVVisAnalysisApp:
         if success:
             with self.load_status_output:
                 print(self.data_manager.get_summary_statistics())
+            
+            # NEW: Automatically adjust color count to number of variations
+            num_variations = self._count_unique_variations()
+            self.color_selector.set_num_colors(num_variations)
+            
             self.tabs.selected_index = 1
+    
+    # NEW: Helper method to count unique variations
+    def _count_unique_variations(self):
+        """Count unique variations/samples in loaded data"""
+        if not self.data_manager.has_data():
+            return 6  # Default fallback
+        
+        measurements = self.data_manager.get_data()['samples']
+        variations = set(m.get('variation', m.get('sample_name', '')) for m in measurements)
+        num_variations = len(variations)
+        
+        # Ensure reasonable bounds (min 2, max 20)
+        num_variations = max(2, min(20, num_variations))
+        
+        with self.load_status_output:
+            print(f"🎨 Auto-adjusted color palette: {num_variations} colors for {len(variations)} unique variations")
+        
+        return num_variations
     
     def _on_create_plots(self, b):
         if not self.data_manager.has_data():
@@ -261,11 +284,23 @@ class UVVisAnalysisApp:
             return
         
         measurements = self.data_manager.get_data()['samples']
-        colors = self.color_selector.get_colors(num_colors=len(measurements))
         selected_modes = [mode for mode, enabled in self.plot_ui.get_selected_plot_modes() if enabled]
         
         # Get x-axis setting (applies to all plots)
         x_axis_mode = self.plot_ui.get_x_axis_mode()
+        
+        # NEW: build variation->color map preserving measurement order (not sorted)
+        # Track unique variations in order of first appearance
+        seen_variations = {}
+        for measurement in measurements:
+            var = measurement.get('variation', measurement.get('sample_name', ''))
+            if var not in seen_variations:
+                seen_variations[var] = len(seen_variations)
+        
+        # Get colors for number of unique variations
+        colors = self.color_selector.get_colors(num_colors=len(seen_variations))
+        # Map each variation to its color in order of first appearance
+        color_map = {var: colors[idx % len(colors)] for var, idx in seen_variations.items()}
         
         figs, names = [], []
         with self.plot_ui.plotted_content:
@@ -283,7 +318,8 @@ class UVVisAnalysisApp:
                     color_scheme=colors,
                     layout_mode=layout_mode,
                     channels=selected_channels,
-                    x_axis=x_axis_mode  # NEW: Pass x_axis setting
+                    x_axis=x_axis_mode,
+                    color_map=color_map  # NEW
                 )
                 if not isinstance(spectra_figs, list):
                     spectra_figs, spectra_names = [spectra_figs], [spectra_names]
@@ -291,14 +327,14 @@ class UVVisAnalysisApp:
                 names += spectra_names
             if 'bandgap_derivative' in selected_modes:
                 fig, name = self.plot_manager.create_bandgap_derivative_plot(
-                    measurements, colors, x_axis_mode  # x_axis_mode already used here
+                    measurements, colors, x_axis_mode, color_map=color_map  # NEW
                 )
                 figs.append(fig)
                 names.append(name)
             if 'tauc_plot' in selected_modes:
                 thickness = self.plot_ui.get_thickness()
                 fig, name = self.plot_manager.create_tauc_plot(
-                    measurements, colors, thickness
+                    measurements, colors, thickness, color_map=color_map  # NEW
                 )
                 figs.append(fig)
                 names.append(name)
@@ -313,9 +349,9 @@ class UVVisAnalysisApp:
                 ResizablePlotManager.display_plots_resizable(
                     figs, names, container_widget=self.plot_ui.plotted_content
                 )
-                print("✅ Plots created! Proceed to save tab.")
+                print("✅ Plots created! You can now save them using the 'Save Results' tab.")
             
-            self.tabs.selected_index = 2
+            # Removed: self.tabs.selected_index = 2
             
         except Exception as e:
             with self.plot_ui.plotted_content:
