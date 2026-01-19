@@ -163,7 +163,8 @@ class UVVisAnalysisApp:
     
     def _create_tabs(self):
         self.select_batch_tab = widgets.VBox([
-            widgets.HTML("<h3>Select Batches</h3>"),
+            widgets.HTML("<h3>Select Upload</h3>"),
+            widgets.HTML("<p><i>Select one or multiple batches</i></p>"),
             self.batch_selector.get_widget(),
             self.load_status_output
         ])

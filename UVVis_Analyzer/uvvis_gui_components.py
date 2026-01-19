@@ -32,48 +32,73 @@ class UVVisAuthenticationUI(AuthenticationUI):
 
 
 class UVVisBatchSelector:
-    """Batch selection UI for UVVis"""
+    """Batch selection UI for UVVis - Simplified structure like JV-Analysis"""
     
     def __init__(self, callback):
         self.callback = callback
-        self.filter_callback = None  # NEW
+        self.filter_callback = None
+        self.all_batches = []  # Store all batches for filtering
         self._create_widgets()
     
     def _create_widgets(self):
+        # Batch selector (like JV-Analysis)
         self.batch_selector = widgets.SelectMultiple(
             options=[],
-            description='Batches:',
-            style={'description_width': 'initial'},
-            layout=widgets.Layout(width='400px', height='200px')
+            description='Batches',
+            layout=widgets.Layout(width='400px', height='300px')
         )
         
+        # Search field (like JV-Analysis)
+        self.search_field = widgets.Text(
+            description='Search Batch',
+            layout=widgets.Layout(width='400px')
+        )
+        
+        # Buttons
         self.load_button = widgets.Button(
             description='Load Data',
-            button_style='success',
-            layout=widgets.Layout(width='150px')
+            button_style='primary'
         )
-        # NEW: filter button to show only batches with UVVis data
+        
         self.filter_button = widgets.Button(
             description='🔍 Filter UVVis Batches',
             button_style='info',
-            layout=widgets.Layout(width='200px')
+            layout=widgets.Layout(margin='5px 0 0 0')
         )
         
+        # Wire up callbacks - as methods, not local functions
+        self.search_field.observe(self._on_search_enter, names='value')
         self.load_button.on_click(lambda b: self.callback(self.batch_selector))
-        # NEW: wire filter button
         self.filter_button.on_click(lambda b: self.filter_callback() if self.filter_callback else None)
         
+        # Assemble widget (like JV-Analysis: search, selector, buttons)
         self.widget = widgets.VBox([
-            widgets.HTML("<h3>Select Batches</h3>"),
+            self.search_field,
             self.batch_selector,
-            widgets.HBox([self.load_button, self.filter_button])  # NEW
+            self.load_button,
+            self.filter_button
         ])
     
+    def _on_search_enter(self, change):
+        """Handle search field changes - filter batch options"""
+        search_term = self.search_field.value.strip().lower()
+        filtered_options = []
+        
+        for d in self.all_batches:
+            # Handle both tuple and string formats
+            batch_str = d[0] if isinstance(d, tuple) else d
+            if search_term in batch_str.lower():
+                filtered_options.append(d)
+        
+        self.batch_selector.options = filtered_options
+    
     def set_options(self, options):
+        """Set available batch options"""
+        self.all_batches = list(options)
         self.batch_selector.options = options
     
-    # NEW: allow controller to set filter behavior
     def set_filter_callback(self, callback):
+        """Set callback for UVVis batch filtering"""
         self.filter_callback = callback
     
     def get_widget(self):
