@@ -476,13 +476,15 @@ class UVVisAnalysisApp:
         png_bytes = None
         try:
             fig = go.Figure(data=[go.Table(
-                header=dict(values=list(df.columns), fill_color='#007bff', font=dict(color='white', size=12), align='left'),
-                cells=dict(values=[df[col] for col in df.columns], align='left')
+                header=dict(values=list(df.columns), fill_color='#007bff', font=dict(color='white', size=10), align='left', height=25),
+                cells=dict(values=[df[col] for col in df.columns], align='left', height=22, font=dict(size=9))
             )])
             fig.update_layout(
-                width=1200, 
-                height=60 + 40 * len(df),
-                margin=dict(l=0, r=0, t=0, b=0)
+                width=650, 
+                height=50 + 22 * len(df),
+                margin=dict(l=0, r=0, t=0, b=0),
+                paper_bgcolor='white',
+                plot_bgcolor='white'
             )
             png_bytes = fig.to_image(format='png', scale=2)
         except Exception as e:
@@ -560,13 +562,15 @@ class UVVisAnalysisApp:
         png_widget = None
         try:
             fig = go.Figure(data=[go.Table(
-                header=dict(values=list(df.columns), fill_color='#007bff', font=dict(color='white', size=12), align='left'),
-                cells=dict(values=[df[col] for col in df.columns], align='left')
+                header=dict(values=list(df.columns), fill_color='#007bff', font=dict(color='white', size=10), align='left', height=25),
+                cells=dict(values=[df[col] for col in df.columns], align='left', height=22, font=dict(size=9))
             )])
             fig.update_layout(
-                width=1200,
-                height=60 + 40 * len(df),
-                margin=dict(l=0, r=0, t=0, b=0)
+                width=650,
+                height=50 + 22 * len(df),
+                margin=dict(l=0, r=0, t=0, b=0),
+                paper_bgcolor='white',
+                plot_bgcolor='white'
             )
             png_bytes = fig.to_image(format='png', scale=2)
             try:
