@@ -526,6 +526,32 @@ If you tested specific variables or conditions for each sample, please write the
         except Exception as e:
             ErrorHandler.log_error("displaying measurements", e, self.show_other_measurements)
     
+    def _count_unique_conditions(self, filtered_df):
+        """Count unique conditions in filtered data for color palette adjustment
+        
+        Args:
+            filtered_df: Filtered DataFrame
+            
+        Returns:
+            Number of unique conditions (clamped to 2-20)
+        """
+        if filtered_df is None or filtered_df.empty:
+            return 8  # Default fallback
+        
+        # Count unique conditions (the main grouping variable)
+        if 'condition' in filtered_df.columns:
+            num_conditions = filtered_df['condition'].nunique()
+        elif 'sample' in filtered_df.columns:
+            # Fallback to samples if conditions not assigned
+            num_conditions = filtered_df['sample'].nunique()
+        else:
+            num_conditions = 8  # Default
+        
+        # Clamp to reasonable bounds (min 2, max 20)
+        num_conditions = max(2, min(20, num_conditions))
+        
+        return num_conditions
+    
     def _on_apply_filters(self, b):
         """Handle filter application using sample-based filtering with cycle support"""
         data = self.data_manager.get_data()
@@ -618,6 +644,13 @@ If you tested specific variables or conditions for each sample, please write the
                 
                 if final_count > 0:
                     print(f"\n✅ Filtering complete! Proceed to plotting tab.")
+                    
+                    # Auto-adjust color count based on number of conditions
+                    num_conditions = self._count_unique_conditions(filtered_df)
+                    if num_conditions > 0:
+                        self.color_selector.set_num_colors(num_conditions)
+                        print(f"🎨 Auto-adjusted color palette: {num_conditions} colors for {num_conditions} unique conditions")
+                    
                     self._enable_tab(3)
                 else:
                     print(f"\n⚠️  No data remains after filtering. Please adjust filters.")
