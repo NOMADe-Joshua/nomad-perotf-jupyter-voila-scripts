@@ -94,7 +94,8 @@ class UVVisPlotManager:
                 return measurement['intensity'], 'absorption'
         return None, None
     
-    def create_bandgap_derivative_plot(self, measurements, colors=None, x_axis='energy', color_map=None):
+    def create_bandgap_derivative_plot(self, measurements, colors=None, x_axis='energy', color_map=None, 
+                                       bandgap_options=None):
         """
         Create bandgap determination plot using derivative method
         Shows ONLY the derivative of absorption, not the absorption itself
@@ -103,6 +104,7 @@ class UVVisPlotManager:
             measurements: List of measurement dictionaries
             colors: Color scheme
             x_axis: 'energy' or 'wavelength'
+            bandgap_options: Dict with 'auto_fit', 'show_in_legend', 'show_table', 'manual_peaks'
         """
         if not measurements:
             fig = go.Figure()
@@ -111,6 +113,18 @@ class UVVisPlotManager:
         
         if colors is None:
             colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
+        
+        # Parse bandgap options
+        if bandgap_options is None:
+            bandgap_options = {
+                'auto_fit': True,
+                'show_in_legend': True,
+                'show_table': True,
+                'manual_peaks': []
+            }
+        
+        # Table to store all bandgaps
+        bandgap_table_data = []
         
         # Filter to only include absorption measurements
         absorption_measurements = []
@@ -134,36 +148,6 @@ class UVVisPlotManager:
                 name = measurement.get('variation', measurement['sample_name'])
                 color = self._pick_color(color_map, colors, name, i)
                 
-                # Extract bandgaps if available - with debug output
-                bandgaps_uvvis = measurement.get('bandgaps_uvvis', [])
-                
-                # DEBUG: Check if bandgaps exist
-                if bandgaps_uvvis:
-                    print(f"DEBUG Plot: bandgaps_uvvis = {bandgaps_uvvis}, type = {type(bandgaps_uvvis)}")
-                else:
-                    print(f"DEBUG Plot: No bandgaps found for {name}")
-                
-                # Handle different data types
-                if bandgaps_uvvis and isinstance(bandgaps_uvvis, (list, tuple)):
-                    if len(bandgaps_uvvis) > 0:
-                        # Check if elements are numbers or need conversion
-                        try:
-                            bandgap_values = [float(bg) if bg is not None else None for bg in bandgaps_uvvis]
-                            bandgap_values = [bg for bg in bandgap_values if bg is not None]
-                            
-                            if bandgap_values:
-                                bandgap_str = ", ".join([f"{bg:.2f} eV" for bg in bandgap_values])
-                                legend_label = f"{name}<br>Bandgaps (NOMAD): {bandgap_str}"
-                            else:
-                                legend_label = name
-                        except (TypeError, ValueError) as e:
-                            print(f"DEBUG: Error converting bandgaps: {e}, value was: {bandgaps_uvvis}")
-                            legend_label = name
-                    else:
-                        legend_label = name
-                else:
-                    legend_label = name
-                
                 # Convert to photon energy
                 photon_energy = 1239.841984 / wavelength
                 
@@ -179,8 +163,51 @@ class UVVisPlotManager:
                 smoothed_absorption = savgol_filter(interpolated_absorption, window_length=101, polyorder=3)
                 derivative = np.gradient(smoothed_absorption, energy_range)
                 
-                # Find bandgap peaks from derivative
-                peaks_result = self._find_peaks_and_fit_gaussian(energy_range, derivative)
+                # Find bandgap peaks - auto or manual
+                peaks_result = []
+                bandgap_energies = []
+                
+                if bandgap_options['auto_fit']:
+                    # Automatic peak finding with Gaussian fitting
+                    peaks_result = self._find_peaks_and_fit_gaussian(energy_range, derivative)
+                    bandgap_energies = [peak[0] for peak in peaks_result]
+                
+                # Add manual peaks
+                if bandgap_options['manual_peaks']:
+                    for manual_peak in bandgap_options['manual_peaks']:
+                        if energy_range.min() <= manual_peak <= energy_range.max():
+                            # Find closest point in energy_range
+                            idx = np.argmin(np.abs(energy_range - manual_peak))
+                            # Create a fitting range around the manual peak
+                            fitting_range = (energy_range > manual_peak - 0.1) & (energy_range < manual_peak + 0.1)
+                            
+                            try:
+                                # Fit Gaussian at manual position
+                                popt, _ = curve_fit(
+                                    UVVisPlotManager._gaussian,
+                                    energy_range[fitting_range],
+                                    derivative[fitting_range],
+                                    p0=[derivative[idx], manual_peak, 0.05],
+                                )
+                                peaks_result.append((popt[1], popt, fitting_range))
+                                bandgap_energies.append(popt[1])
+                            except:
+                                # If fit fails, just use the manual value
+                                bandgap_energies.append(manual_peak)
+                
+                # Create legend label with bandgaps if requested
+                if bandgap_options['show_in_legend'] and bandgap_energies:
+                    bandgap_str = ", ".join([f"{bg:.2f} eV" for bg in sorted(bandgap_energies)])
+                    legend_label = f"{name}<br>Eg: {bandgap_str}"
+                else:
+                    legend_label = name
+                
+                # Store for table
+                if bandgap_energies:
+                    bandgap_table_data.append({
+                        'Sample': name,
+                        'Bandgaps (eV)': bandgap_energies
+                    })
                 
                 if x_axis == 'wavelength':
                     # Convert back to wavelength
@@ -200,22 +227,23 @@ class UVVisPlotManager:
                         hovertemplate=f'<b>{name}</b><br>λ: %{{x:.1f}} nm<br>d(A)/dλ: %{{y:.4f}}<extra></extra>'
                     ))
                     
-                    # Add bandgap markers (hidden from legend)
+                    # Add bandgap markers and Gaussian fits
                     for bandgap_energy, popt, fitting_range in peaks_result:
                         lambda_bg = 1239.841984 / bandgap_energy
                         lambda_fit = 1239.841984 / energy_range[fitting_range][::-1]
                         
                         fig.add_trace(go.Scatter(
                             x=lambda_fit,
-                            y=self._gaussian(energy_range[fitting_range], *popt)[::-1],
+                            y=UVVisPlotManager._gaussian(energy_range[fitting_range], *popt)[::-1],
                             mode='lines',
-                            line=dict(color=color, dash='dot'),
+                            line=dict(color=color, dash='dot', width=1.5),
                             showlegend=False,
                             hovertemplate=f'<b>{name}</b><br>Bandgap: {bandgap_energy:.2f} eV<extra></extra>'
                         ))
                         
-                        fig.add_vline(x=lambda_bg, line_dash="dash", line_color=color,
-                                     annotation_text=f"{bandgap_energy:.2f} eV")
+                        fig.add_vline(x=lambda_bg, line_dash="dash", line_color=color, opacity=0.6,
+                                     annotation_text=f"{bandgap_energy:.2f} eV",
+                                     annotation_position="top")
                     
                 else:  # x_axis == 'energy'
                     x_smooth = energy_range
@@ -231,22 +259,25 @@ class UVVisPlotManager:
                         hovertemplate=f'<b>{name}</b><br>E: %{{x:.3f}} eV<br>d(A)/dE: %{{y:.4f}}<extra></extra>'
                     ))
                     
-                    # Add bandgap markers and Gaussian fits (hidden from legend)
+                    # Add bandgap markers and Gaussian fits
                     for bandgap_energy, popt, fitting_range in peaks_result:
                         fig.add_trace(go.Scatter(
                             x=energy_range[fitting_range],
-                            y=self._gaussian(energy_range[fitting_range], *popt),
+                            y=UVVisPlotManager._gaussian(energy_range[fitting_range], *popt),
                             mode='lines',
-                            line=dict(color=color, dash='dot'),
+                            line=dict(color=color, dash='dot', width=1.5),
                             showlegend=False,
                             hovertemplate=f'<b>{name}</b><br>Bandgap: {bandgap_energy:.2f} eV<extra></extra>'
                         ))
                         
-                        fig.add_vline(x=bandgap_energy, line_dash="dash", line_color=color,
-                                     annotation_text=f"{bandgap_energy:.2f} eV")
+                        fig.add_vline(x=bandgap_energy, line_dash="dash", line_color=color, opacity=0.6,
+                                     annotation_text=f"{bandgap_energy:.2f} eV",
+                                     annotation_position="top")
             
             except Exception as e:
                 print(f"Error processing {measurement['sample_name']}: {e}")
+                import traceback
+                traceback.print_exc()
                 continue
         
         # Update layout
@@ -263,7 +294,9 @@ class UVVisPlotManager:
         )
         
         filename = f"uvvis_bandgap_derivative_{x_axis}.html"
-        return fig, filename
+        
+        # Return figure, filename, and bandgap table data
+        return fig, filename, bandgap_table_data
     
     def create_tauc_plot(self, measurements, colors=None, thickness_nm=550, color_map=None):
         """
@@ -430,6 +463,7 @@ class UVVisPlotManager:
         
         return fig, "uvvis_tauc_plot.html"
     
+    @staticmethod
     def _gaussian(x, amp, cen, wid):
         """Gaussian function for peak fitting"""
         return amp * np.exp(-((x - cen) ** 2) / (2 * wid**2))

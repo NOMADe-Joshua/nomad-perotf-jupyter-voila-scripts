@@ -150,6 +150,34 @@ class UVVisPlotUI:
             layout=widgets.Layout(display='none', width='200px')
         )
         
+        # NEW: Bandgap fitting controls
+        self.bandgap_controls = widgets.VBox([
+            widgets.HTML("<b>Bandgap Analysis Options:</b>"),
+            widgets.Checkbox(
+                value=True,
+                description='🔍 Auto-fit peaks (Gaussian)',
+                tooltip='Automatically find and fit Gaussian peaks in derivative'
+            ),
+            widgets.Checkbox(
+                value=True,
+                description='📊 Show bandgaps in legend',
+                tooltip='Display fitted bandgap values in plot legend'
+            ),
+            widgets.Checkbox(
+                value=True,
+                description='📋 Show bandgap table',
+                tooltip='Display table with all fitted bandgaps below plot'
+            ),
+            widgets.Text(
+                value='',
+                description='Manual peaks (eV):',
+                placeholder='e.g. 1.55, 2.1, 2.8',
+                style={'description_width': 'initial'},
+                tooltip='Comma-separated list of manual peak positions in eV',
+                layout=widgets.Layout(width='350px')
+            )
+        ], layout=widgets.Layout(display='none', margin='10px 0'))
+        
         self.plot_button = widgets.Button(
             description='Create Plots',
             button_style='success',
@@ -168,6 +196,7 @@ class UVVisPlotUI:
             self.layout_radio,
             self.channel_checks,
             self.x_axis_radio,
+            self.bandgap_controls,
             self.thickness_input,
             self.plot_button,
             widgets.HTML("<hr>"),
@@ -184,6 +213,7 @@ class UVVisPlotUI:
         self.layout_radio.layout.display = 'flex' if spectra_checked else 'none'
         self.channel_checks.layout.display = 'flex' if spectra_checked else 'none'
         self.x_axis_radio.layout.display = 'flex' if bandgap_checked else 'none'
+        self.bandgap_controls.layout.display = 'flex' if bandgap_checked else 'none'
         self.thickness_input.layout.display = 'flex' if tauc_checked else 'none'
     
     def get_selected_plot_modes(self):
@@ -210,6 +240,25 @@ class UVVisPlotUI:
     
     def get_thickness(self):
         return self.thickness_input.value
+    
+    def get_bandgap_options(self):
+        """Get bandgap fitting options"""
+        controls = self.bandgap_controls.children
+        manual_peaks_str = controls[4].value.strip()
+        manual_peaks = []
+        
+        if manual_peaks_str:
+            try:
+                manual_peaks = [float(x.strip()) for x in manual_peaks_str.split(',') if x.strip()]
+            except ValueError:
+                print("⚠️ Warning: Could not parse manual peaks. Format: 1.55, 2.1, 2.8")
+        
+        return {
+            'auto_fit': controls[1].value,
+            'show_in_legend': controls[2].value,
+            'show_table': controls[3].value,
+            'manual_peaks': manual_peaks
+        }
     
     def set_plot_callback(self, callback):
         self.plot_button.on_click(callback)

@@ -156,6 +156,7 @@ class UVVisAnalysisApp:
         self.plot_ui = UVVisPlotUI()
         self.save_ui = UVVisSaveUI()
         self.color_selector = ColorSchemeSelector()
+        self.bandgap_download_box = widgets.VBox()
         
         self.load_status_output = widgets.Output(
             layout=widgets.Layout(border='1px solid #eee', padding='10px', margin='10px 0')
@@ -179,7 +180,12 @@ class UVVisAnalysisApp:
         self.tabs.children = [
             self.select_batch_tab,
             plot_tab_content,
-            self.save_ui.get_widget()
+            widgets.VBox([
+                self.save_ui.get_widget(),
+                widgets.HTML("<hr>"),
+                widgets.HTML("<h3>Bandgap Table Downloads</h3>"),
+                self.bandgap_download_box
+            ])
         ]
         
         for i, title in enumerate(['Select Batches', 'Create Plots', 'Save Results']):
@@ -327,11 +333,21 @@ class UVVisAnalysisApp:
                 figs += spectra_figs
                 names += spectra_names
             if 'bandgap_derivative' in selected_modes:
-                fig, name = self.plot_manager.create_bandgap_derivative_plot(
-                    measurements, colors, x_axis_mode, color_map=color_map  # NEW
+                bandgap_options = self.plot_ui.get_bandgap_options()
+                fig, name, bandgap_table = self.plot_manager.create_bandgap_derivative_plot(
+                    measurements, colors, x_axis_mode, color_map=color_map,
+                    bandgap_options=bandgap_options
                 )
                 figs.append(fig)
                 names.append(name)
+                
+                # Store bandgap table for display
+                if bandgap_table and bandgap_options.get('show_table', True):
+                    if not hasattr(self, 'bandgap_tables'):
+                        self.bandgap_tables = []
+                    self.bandgap_tables.append(bandgap_table)
+                    # Persist latest tables for save tab
+                    self.latest_bandgap_tables = list(getattr(self, 'bandgap_tables', []))
             if 'tauc_plot' in selected_modes:
                 thickness = self.plot_ui.get_thickness()
                 fig, name = self.plot_manager.create_tauc_plot(
@@ -350,6 +366,16 @@ class UVVisAnalysisApp:
                 ResizablePlotManager.display_plots_resizable(
                     figs, names, container_widget=self.plot_ui.plotted_content
                 )
+                
+                # Display bandgap tables if available
+                if hasattr(self, 'bandgap_tables') and self.bandgap_tables:
+                    for table_data in self.bandgap_tables:
+                        self._display_bandgap_table(table_data)
+                    # Update save-tab downloads
+                    self._update_bandgap_downloads(self.bandgap_tables)
+                    # Clear for next plot creation (but keep latest for save tab)
+                    self.bandgap_tables = []
+                
                 print("✅ Plots created! You can now save them using the 'Save Results' tab.")
             
             # Removed: self.tabs.selected_index = 2
@@ -379,6 +405,192 @@ class UVVisAnalysisApp:
     
     def _on_save_all(self, b):
         self._on_save_plots(b)
+    
+    def _display_bandgap_table(self, table_data):
+        """Display bandgap table below plots and offer downloads"""
+        import pandas as pd
+        from IPython.display import display, HTML
+        import io
+        import plotly.graph_objects as go
+        import ipywidgets as widgets
+        import base64
+        
+        if not table_data:
+            return
+        
+        # Create dataframe for reuse (CSV + plotly table)
+        df = pd.DataFrame([
+            {
+                'Sample': row['Sample'],
+                'Bandgap(s) [eV]': ', '.join([f"{bg:.2f}" for bg in sorted(row['Bandgaps (eV)'])]),
+                '# Peaks': len(row['Bandgaps (eV)'])
+            }
+            for row in table_data
+        ])
+        
+        # Create HTML table for inline display
+        html = '<div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 5px;">'
+        html += '<h4 style="margin-top: 0; color: #2c3e50; display: flex; align-items: center; gap: 10px;">📊 Fitted Bandgap Values</h4>'
+        html += '<table style="width: 100%; border-collapse: collapse; background: white;">'
+        html += '<thead><tr style="background-color: #007bff; color: white;">'
+        html += '<th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Sample</th>'
+        html += '<th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Bandgap(s) [eV]</th>'
+        html += '<th style="padding: 10px; text-align: center; border: 1px solid #ddd;"># Peaks</th>'
+        html += '</tr></thead><tbody>'
+        
+        for _, row in df.iterrows():
+            html += f'<tr>'
+            html += f'<td style="padding: 8px; border: 1px solid #ddd;">{row["Sample"]}</td>'
+            html += f'<td style="padding: 8px; border: 1px solid #ddd; font-family: monospace;">{row["Bandgap(s) [eV]"]}</td>'
+            html += f'<td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{row["# Peaks"]}</td>'
+            html += f'</tr>'
+        
+        html += '</tbody></table>'
+        html += '<div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap;">'
+        html += '<span style="color: #6c757d;">Download:</span>'
+        html += '</div>'
+        html += '</div>'
+        
+        # Prepare downloads (FileDownload may be missing on older ipywidgets)
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False, sep=';')
+        csv_bytes = csv_buffer.getvalue().encode('utf-8')
+        csv_dl = None
+        try:
+            csv_dl = widgets.FileDownload(
+                data=csv_bytes,
+                filename='bandgaps.csv',
+                description='⬇️ CSV',
+                button_style='primary',
+                layout=widgets.Layout(width='120px')
+            )
+        except AttributeError:
+            b64 = base64.b64encode(csv_bytes).decode('utf-8')
+            csv_link = widgets.HTML(
+                value=f'<a download="bandgaps.csv" href="data:text/csv;base64,{b64}" '
+                      f'style="text-decoration:none"><button style="padding:6px 12px;background:#007bff;color:white;border:none;border-radius:4px;">⬇️ CSV</button></a>'
+            )
+            csv_dl = csv_link
+        
+        # Plotly table to image (PNG) using kaleido if available
+        png_bytes = None
+        try:
+            fig = go.Figure(data=[go.Table(
+                header=dict(values=list(df.columns), fill_color='#007bff', font=dict(color='white', size=12), align='left'),
+                cells=dict(values=[df[col] for col in df.columns], align='left')
+            )])
+            fig.update_layout(
+                width=1200, 
+                height=60 + 40 * len(df),
+                margin=dict(l=0, r=0, t=0, b=0)
+            )
+            png_bytes = fig.to_image(format='png', scale=2)
+        except Exception as e:
+            png_bytes = None
+            print(f"⚠️ PNG export unavailable (kaleido missing?): {e}")
+        
+        png_dl = None
+        if png_bytes:
+            try:
+                png_dl = widgets.FileDownload(
+                    data=png_bytes,
+                    filename='bandgaps.png',
+                    description='⬇️ PNG',
+                    button_style='info',
+                    layout=widgets.Layout(width='120px')
+                )
+            except AttributeError:
+                b64 = base64.b64encode(png_bytes).decode('utf-8')
+                png_link = widgets.HTML(
+                    value=f'<a download="bandgaps.png" href="data:image/png;base64,{b64}" '
+                          f'style="text-decoration:none"><button style="padding:6px 12px;background:#17a2b8;color:white;border:none;border-radius:4px;">⬇️ PNG</button></a>'
+                )
+                png_dl = png_link
+        
+        # Display table and buttons
+        display(HTML(html))
+        downloads = [csv_dl] + ([png_dl] if png_dl else [])
+        display(widgets.HBox(downloads))
+
+    def _update_bandgap_downloads(self, tables):
+        """Populate bandgap download buttons on Save Results tab"""
+        import pandas as pd
+        import io
+        import base64
+        import plotly.graph_objects as go
+        import ipywidgets as widgets
+
+        self.bandgap_download_box.children = []
+        if not tables:
+            self.bandgap_download_box.children = [widgets.HTML("<i>No bandgap table available. Create plots first.</i>")]
+            return
+
+        # Merge all tables into one DataFrame
+        rows = []
+        for table in tables:
+            for row in table:
+                rows.append({
+                    'Sample': row['Sample'],
+                    'Bandgap(s) [eV]': ', '.join([f"{bg:.2f}" for bg in sorted(row['Bandgaps (eV)'])]),
+                    '# Peaks': len(row['Bandgaps (eV)'])
+                })
+        df = pd.DataFrame(rows)
+
+        # CSV download
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False, sep=';')
+        csv_bytes = csv_buffer.getvalue().encode('utf-8')
+        csv_widget = None
+        try:
+            csv_widget = widgets.FileDownload(
+                data=csv_bytes,
+                filename='bandgaps.csv',
+                description='⬇️ CSV',
+                button_style='primary',
+                layout=widgets.Layout(width='120px')
+            )
+        except AttributeError:
+            b64 = base64.b64encode(csv_bytes).decode('utf-8')
+            csv_widget = widgets.HTML(
+                value=f'<a download="bandgaps.csv" href="data:text/csv;base64,{b64}" '
+                      f'style="text-decoration:none"><button style="padding:6px 12px;background:#007bff;color:white;border:none;border-radius:4px;">⬇️ CSV</button></a>'
+            )
+
+        # PNG download (optional, kaleido)
+        png_widget = None
+        try:
+            fig = go.Figure(data=[go.Table(
+                header=dict(values=list(df.columns), fill_color='#007bff', font=dict(color='white', size=12), align='left'),
+                cells=dict(values=[df[col] for col in df.columns], align='left')
+            )])
+            fig.update_layout(
+                width=1200,
+                height=60 + 40 * len(df),
+                margin=dict(l=0, r=0, t=0, b=0)
+            )
+            png_bytes = fig.to_image(format='png', scale=2)
+            try:
+                png_widget = widgets.FileDownload(
+                    data=png_bytes,
+                    filename='bandgaps.png',
+                    description='⬇️ PNG',
+                    button_style='info',
+                    layout=widgets.Layout(width='120px')
+                )
+            except AttributeError:
+                b64 = base64.b64encode(png_bytes).decode('utf-8')
+                png_widget = widgets.HTML(
+                    value=f'<a download="bandgaps.png" href="data:image/png;base64,{b64}" '
+                          f'style="text-decoration:none"><button style="padding:6px 12px;background:#17a2b8;color:white;border:none;border-radius:4px;">⬇️ PNG</button></a>'
+                )
+        except Exception as e:
+            print(f"⚠️ PNG export unavailable (kaleido missing?): {e}")
+
+        downloads = [w for w in [csv_widget, png_widget] if w is not None]
+        if downloads:
+            self.bandgap_download_box.children = [widgets.HBox(downloads)]
+        else:
+            self.bandgap_download_box.children = [widgets.HTML("<i>Downloads unavailable.</i>")]
     
     def get_dashboard(self):
         return widgets.VBox([
