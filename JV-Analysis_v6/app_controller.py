@@ -30,6 +30,7 @@ if parent_dir not in sys.path:
 
 # Import the new organized modules
 from gui_components import AuthenticationUI, FilterUI, PlotUI, SaveUI, ColorSchemeSelector, InfoUI
+from font_size_ui import FontSizeUI
 from data_manager import DataManager
 from plot_manager import plotting_string_action
 from utils import save_full_data_frame
@@ -139,6 +140,7 @@ class JVAnalysisApp:
         self.plot_ui = PlotUI()
         self.save_ui = SaveUI()
         self.color_selector = ColorSchemeSelector()
+        self.font_size_ui = FontSizeUI(callback=self._on_font_size_change)  # ADD this line
         self.info_ui = InfoUI()  # ADD this line
     
         # Give FilterUI access to DataManager for preview functionality
@@ -197,11 +199,13 @@ class JVAnalysisApp:
             widgets.VBox([self.show_other_measurements])
         ])
         
-        # Create plot tab with color selector between controls and plots
+        # Create plot tab with color selector and font size controls
         plot_tab_content = widgets.VBox([
             self.plot_ui.get_widget(),
             widgets.HTML("<hr style='margin: 20px 0;'>"),  # Separator
             self.color_selector.get_widget(),
+            widgets.HTML("<hr style='margin: 20px 0;'>"),  # Separator
+            self.font_size_ui.get_widget(),  # ADD font size UI
             widgets.HTML("<hr style='margin: 20px 0;'>"),  # Another separator
             widgets.HTML("<h3>Generated Plots</h3>"),
             self.plot_ui.plotted_content  # Now plots appear after color selection
@@ -457,6 +461,12 @@ If you tested specific variables or conditions for each sample, please write the
     def _on_change_default_variables(self, change):
         """Handle default variables change"""
         self._make_variables_menu()
+    
+    def _on_font_size_change(self, axis_size, title_size, legend_size):
+        """Handle font size changes"""
+        # This callback is triggered when font sizes are adjusted in the UI
+        # The actual font sizes are applied during plot creation via plotting_string_action
+        pass
     
     def _download_jv_data(self, e=None):
         """Download JV data as CSV"""
@@ -726,6 +736,9 @@ If you tested specific variables or conditions for each sample, please write the
             # GET scan direction separation setting
             separate_scan_dir = self.plot_ui.get_separate_scan_dir()
             
+            # Get font size settings
+            font_size_settings = self.font_size_ui.get_font_sizes()
+            
             # Create plots using the plot manager
             figs, names = plotting_string_action(
                 plot_selections, 
@@ -733,7 +746,8 @@ If you tested specific variables or conditions for each sample, please write the
                 support_data, 
                 is_voila=True,
                 color_scheme=selected_colors,
-                separate_scan_dir=separate_scan_dir
+                separate_scan_dir=separate_scan_dir,
+                **font_size_settings  # Pass font size parameters
             )
             
             # CRITICAL FIX: Initialize lists and generate titles/subtitles

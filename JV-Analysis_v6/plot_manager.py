@@ -35,9 +35,18 @@ def _flatten_multiindex_columns(self, df):
         df.columns = ['_'.join(col).strip() for col in df.columns.values]
     return df
 
-def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=None, separate_scan_dir=False):
+def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=None, separate_scan_dir=False, font_size_axis=None, font_size_title=None, font_size_legend=None):
     """
     Main plotting function that processes plot codes and creates figures.
+    
+    Parameters:
+    -----------
+    font_size_axis : int, optional
+        Font size for axis labels and tick labels (default: 12)
+    font_size_title : int, optional
+        Font size for plot titles (default: 16)
+    font_size_legend : int, optional
+        Font size for legend text (default: 10)
     """
     filtered_jv, complete_jv, filtered_curves = data
     omitted_jv, filter_pars, is_conditions, path, samples = supp
@@ -47,6 +56,10 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
     # Create plot manager
     plot_manager = PlotManager()
     plot_manager.set_output_path(path)
+    
+    # Set font sizes if provided
+    if font_size_axis is not None or font_size_title is not None or font_size_legend is not None:
+        plot_manager.set_font_sizes(font_size_axis, font_size_title, font_size_legend)
 
     if color_scheme is None:
         color_scheme = [
@@ -281,10 +294,28 @@ class PlotManager:
     
     def __init__(self):
         self.plot_output_path = ""
+        self.font_size_axis = 12  # Default font size for axis labels
+        self.font_size_title = 16  # Default font size for titles
+        self.font_size_legend = 10  # Default font size for legend
         # REMOVED: No more FIXED_CATEGORY_COLORS - only use selected color scheme
     
     def set_output_path(self, path):
         self.plot_output_path = path
+    
+    def set_font_sizes(self, axis_size=None, title_size=None, legend_size=None):
+        """Set font sizes for plots"""
+        if axis_size is not None:
+            self.font_size_axis = axis_size
+        if title_size is not None:
+            self.font_size_title = title_size
+        if legend_size is not None:
+            self.font_size_legend = legend_size
+    
+    def apply_font_sizes_to_axes(self, fig):
+        """Apply current font size settings to a figure's axes"""
+        fig.update_xaxes(titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis))
+        fig.update_yaxes(titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis))
+        return fig
 
     def _extract_rgb_from_color(self, color_string):
         """Extract RGB values from color string"""
@@ -761,11 +792,11 @@ class PlotManager:
         
         # Update layout
         fig.update_layout(
-            title=f"JV Curves - Best Device ({best_sample} [Cell {best_cell}])",
+            title=dict(text=f"JV Curves - Best Device ({best_sample} [Cell {best_cell}])", font=dict(size=self.font_size_title)),
             xaxis_title='Voltage [V]',
             yaxis_title='Current Density [mA/cm²]',
-            xaxis=dict(range=[-0.2, x_max]),
-            yaxis=dict(range=[-5, 25]),
+            xaxis=dict(range=[-0.2, x_max], titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
+            yaxis=dict(range=[-5, 25], titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
             template="plotly_white",
             legend=dict(
                 x=0.02,  # Start left inside
@@ -775,7 +806,7 @@ class PlotManager:
                 bgcolor="rgba(255,255,255,0.85)",
                 bordercolor="black",
                 borderwidth=1,
-                font=dict(size=10)
+                font=dict(size=self.font_size_legend)
             ),
             showlegend=True,
             margin=dict(l=80, r=50, t=80, b=80),
@@ -923,11 +954,11 @@ class PlotManager:
         
         # Update layout with DRAGGABLE legend
         fig.update_layout(
-            title=f"JV Curves - Best Measurement per {grouping_col.title()}",
+            title=dict(text=f"JV Curves - Best Measurement per {grouping_col.title()}", font=dict(size=self.font_size_title)),
             xaxis_title='Voltage [V]',
             yaxis_title='Current Density [mA/cm²]',
-            xaxis=dict(range=[-0.2, x_max]),
-            yaxis=dict(range=[-5, 25]),
+            xaxis=dict(range=[-0.2, x_max], titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
+            yaxis=dict(range=[-5, 25], titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
             template="plotly_white",
             legend=dict(
                 x=0.02,  # Start position left inside plot
@@ -937,7 +968,7 @@ class PlotManager:
                 bgcolor="rgba(255,255,255,0.85)",  # Semi-transparent background
                 bordercolor="black",
                 borderwidth=1,
-                font=dict(size=10)  # Slightly smaller font to save space
+                font=dict(size=self.font_size_legend)  # Slightly smaller font to save space
             ),
             showlegend=True,
             margin=dict(l=80, r=50, t=80, b=80),  # Normal margins
@@ -1048,11 +1079,11 @@ class PlotManager:
             # Update layout for this figure
             if plot_type == "working":
                 fig.update_layout(
-                    title=f"JV Curves - Sample: {sample} (Working Cells Only)",
+                    title=dict(text=f"JV Curves - Sample: {sample} (Working Cells Only)", font=dict(size=self.font_size_title)),
                     xaxis_title='Voltage [V]',
                     yaxis_title='Current Density [mA/cm²]',
-                    xaxis=dict(range=[-0.2, x_max]),
-                    yaxis=dict(range=[-5, 25]),
+                    xaxis=dict(range=[-0.2, x_max], titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
+                    yaxis=dict(range=[-5, 25], titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
                     template="plotly_white",
                     legend=dict(
                         x=0.02,
@@ -1062,7 +1093,7 @@ class PlotManager:
                         bgcolor="rgba(255,255,255,0.85)",
                         bordercolor="black",
                         borderwidth=1,
-                        font=dict(size=10)
+                        font=dict(size=self.font_size_legend)
                     ),
                     showlegend=True,
                     margin=dict(l=80, r=50, t=80, b=80),
@@ -1071,11 +1102,11 @@ class PlotManager:
                 )
             else:
                 fig.update_layout(
-                    title=f"JV Curves - Sample: {sample} (All Cells)",
+                    title=dict(text=f"JV Curves - Sample: {sample} (All Cells)", font=dict(size=self.font_size_title)),
                     xaxis_title='Voltage [V]',
                     yaxis_title='Current Density [mA/cm²]',
-                    xaxis=dict(range=[-0.2, x_max]),
-                    yaxis=dict(range=[-5, 25]),
+                    xaxis=dict(range=[-0.2, x_max], titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
+                    yaxis=dict(range=[-5, 25], titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
                     template="plotly_white",
                     legend=dict(
                         x=0.02,
@@ -1085,7 +1116,7 @@ class PlotManager:
                         bgcolor="rgba(255,255,255,0.85)",
                         bordercolor="black",
                         borderwidth=1,
-                        font=dict(size=10)
+                        font=dict(size=self.font_size_legend)
                     ),
                     showlegend=True,
                     margin=dict(l=80, r=50, t=80, b=80),
@@ -1196,11 +1227,11 @@ class PlotManager:
             # Update layout for this figure
             if plot_type == "working":
                 fig.update_layout(
-                    title=f"JV Curves - Sample: {sample} (Working Cells Only)",
+                    title=dict(text=f"JV Curves - Sample: {sample} (Working Cells Only)", font=dict(size=self.font_size_title)),
                     xaxis_title='Voltage [V]',
                     yaxis_title='Current Density [mA/cm²]',
-                    xaxis=dict(range=[-0.2, x_max]),
-                    yaxis=dict(range=[-5, 25]),
+                    xaxis=dict(range=[-0.2, x_max], titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
+                    yaxis=dict(range=[-5, 25], titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
                     template="plotly_white",
                     legend=dict(
                         x=0.02,
@@ -1210,7 +1241,7 @@ class PlotManager:
                         bgcolor="rgba(255,255,255,0.85)",
                         bordercolor="black",
                         borderwidth=1,
-                        font=dict(size=10)
+                        font=dict(size=self.font_size_legend)
                     ),
                     showlegend=True,
                     margin=dict(l=80, r=50, t=80, b=80),
@@ -1219,11 +1250,11 @@ class PlotManager:
                 )
             else:
                 fig.update_layout(
-                    title=f"JV Curves - Sample: {sample} (All Cells)",
+                    title=dict(text=f"JV Curves - Sample: {sample} (All Cells)", font=dict(size=self.font_size_title)),
                     xaxis_title='Voltage [V]',
                     yaxis_title='Current Density [mA/cm²]',
-                    xaxis=dict(range=[-0.2, x_max]),
-                    yaxis=dict(range=[-5, 25]),
+                    xaxis=dict(range=[-0.2, x_max], titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
+                    yaxis=dict(range=[-5, 25], titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
                     template="plotly_white",
                     legend=dict(
                         x=0.02,
@@ -1233,7 +1264,7 @@ class PlotManager:
                         bgcolor="rgba(255,255,255,0.85)",
                         bordercolor="black",
                         borderwidth=1,
-                        font=dict(size=10)
+                        font=dict(size=self.font_size_legend)
                     ),
                     showlegend=True,
                     margin=dict(l=80, r=50, t=80, b=80),
@@ -1450,6 +1481,7 @@ class PlotManager:
 
                 fig.update_xaxes(
                     ticktext=list(group_keys_param) if row == 2 else [""] * len(group_keys_param),
+                    tickfont=dict(size=self.font_size_axis),
                     showgrid=True,
                     gridwidth=1,
                     gridcolor='lightgray',
@@ -1461,6 +1493,8 @@ class PlotManager:
             fig.update_yaxes(
                 title_text=y_axis_label,
                 title_standoff=5,
+                titlefont=dict(size=self.font_size_axis),
+                tickfont=dict(size=self.font_size_axis),
                 showgrid=True,
                 gridwidth=1,
                 gridcolor='lightgray',
@@ -1481,7 +1515,7 @@ class PlotManager:
             title_text += " (Filtered Out Data)"
 
         fig.update_layout(
-            title=dict(text=title_text, x=0.5, xanchor='center', font=dict(size=16, color='black')),
+            title=dict(text=title_text, x=0.5, xanchor='center', font=dict(size=self.font_size_title, color='black')),
             template="plotly_white",
             showlegend=False,
             width=1600,   # 👈 CHANGED: 16:10 aspect ratio width
@@ -1491,6 +1525,10 @@ class PlotManager:
             paper_bgcolor='white',
             hovermode='closest'
         )
+        
+        # Apply font sizes to all axes
+        fig.update_xaxes(titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis))
+        fig.update_yaxes(titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis))
 
         # Tilt x-axis tick labels for many categories (bottom row only)
         if not separate_scan_dir and len(group_keys) > 4:
@@ -1695,7 +1733,7 @@ class PlotManager:
             title_text += " (Filtered Out Data)"
 
         fig.update_layout(
-            title=dict(text=title_text, x=0.5, xanchor='center', font=dict(size=16, color='black')),
+            title=dict(text=title_text, x=0.5, xanchor='center', font=dict(size=self.font_size_title, color='black')),
             template="plotly_white",
             showlegend=False,
             width=1600,   # 👈 CHANGED: 16:10 aspect ratio width  
@@ -1703,7 +1741,9 @@ class PlotManager:
             margin=dict(l=80, r=200, t=130, b=80),
             plot_bgcolor='white',
             paper_bgcolor='white',
-            hovermode='closest'
+            hovermode='closest',
+            xaxis=dict(titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
+            yaxis=dict(titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis))
         )
 
         fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
