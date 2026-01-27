@@ -39,10 +39,34 @@ class DragDropUploadWidget:
         # Observe file uploads
         self.file_upload.observe(self._handle_file_upload, names='value')
     
+    def _iter_files(self, file_value):
+        """Normalize ipywidgets FileUpload value to (name, content) tuples"""
+        if not file_value:
+            return []
+        if isinstance(file_value, dict):
+            return [
+                (name, self._to_bytes(info.get('content')))
+                for name, info in file_value.items()
+                if isinstance(info, dict)
+            ]
+        return [
+            (info.get('name'), self._to_bytes(info.get('content')))
+            for info in file_value
+            if isinstance(info, dict) and info.get('name')
+        ]
+
+    @staticmethod
+    def _to_bytes(content):
+        """Ensure uploaded file content is bytes for downstream processing"""
+        if isinstance(content, memoryview):
+            return content.tobytes()
+        return content
+
     def _handle_file_upload(self, change):
         """Handle files selected via button click"""
-        for filename, file_info in self.file_upload.value.items():
-            self.uploaded_files[filename] = file_info['content']
+        files = change.get('new') if change else self.file_upload.value
+        for filename, content in self._iter_files(files):
+            self.uploaded_files[filename] = content
     
     def get_widget(self):
         """
@@ -136,11 +160,12 @@ class DragDropUploadWidget:
     
     def _get_file_list_html(self):
         """Generate HTML for uploaded files list"""
-        if not self.file_upload.value:
+        files = self._iter_files(self.file_upload.value)
+        if not files:
             return "<div style='color: #999; font-size: 13px; margin-top: 10px;'>No files uploaded</div>"
         
         files_html = "<div style='margin-top: 15px;'><b>Uploaded files:</b><ul style='margin: 8px 0;'>"
-        for filename in self.file_upload.value.keys():
+        for filename, _ in files:
             files_html += f"<li style='color: #2196F3; font-size: 13px; margin: 5px 0;'>✓ {filename}</li>"
         files_html += "</ul></div>"
         
@@ -152,7 +177,7 @@ class DragDropUploadWidget:
     
     def clear(self):
         """Clear all uploaded files"""
-        self.file_upload.value.clear()
+        self.file_upload.value = () if isinstance(self.file_upload.value, tuple) else {}
         self.uploaded_files.clear()
 
 

@@ -184,13 +184,16 @@ def process_files(files_dict: Dict[str, bytes], output_folder: str = "") -> Tupl
         total_processed = 0
         
         for filename, content in files_dict.items():
+            # Normalize to bytes
+            if isinstance(content, memoryview):
+                content = content.tobytes()
             # Decode content
             try:
                 file_content = content.decode('utf-8')
             except UnicodeDecodeError:
                 try:
                     file_content = content.decode('latin-1')
-                except:
+                except Exception:
                     continue
             
             # Process file
