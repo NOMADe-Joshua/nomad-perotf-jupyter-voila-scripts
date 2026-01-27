@@ -43,7 +43,7 @@ def extract_metadata(header_lines: List[str]) -> Dict[str, str]:
 
 def format_old_file(sample_name: str, area: str, is_illuminated: bool, 
                    date: str, scan1: List[Tuple[float, float]], 
-                   scan2: List[Tuple[float, float]]) -> str:
+                   scan2: List[Tuple[float, float]], comment: str = "") -> str:
     """Format data into old LTI format"""
     header = [
         f"LTI @ KIT\tPV cell J-V measurement - measured by Puri \t\t",
@@ -55,7 +55,7 @@ def format_old_file(sample_name: str, area: str, is_illuminated: bool,
         f"Voc [V]:\t0.000000E+0\t0.000000E+0\t",
         "Fill factor:\t0.000000E+0\t0.000000E+0\t",
         "Efficiency:\t0.000000E+0\t0.000000E+0\t",
-        "Commentary:\t\t\t",
+        f"Commentary:\t{comment}\t\t",
         "Hysteresis\t1\t\t",
         "Voltage [V]\tCurrent density [1] [mA/cm^2]\tCurrent density [2] [mA/cm^2]\tAverage current density [mA/cm^2]"
     ]
@@ -78,13 +78,14 @@ def parse_scan(scan_lines: List[str]) -> List[Tuple[float, float]]:
         return []
 
 
-def process_single_file(file_content: str, original_filename: str) -> Dict[str, str]:
+def process_single_file(file_content: str, original_filename: str, output_folder: str = "") -> Dict[str, str]:
     """
     Process a single IV file and return dict of {output_filename: content}
     
     Args:
         file_content: Content of the input file
         original_filename: Original name of the file
+        output_folder: Path to output folder (for cycle detection)
     
     Returns:
         Dictionary mapping output filenames to their content
@@ -107,6 +108,7 @@ def process_single_file(file_content: str, original_filename: str) -> Dict[str, 
     sample_name = metadata.get("Sample Name", "unknown_sample")
     area = metadata.get("Active Area (cm2)", "1.0")
     date = metadata.get("Test Start Time", "20000000_00:00:00")
+    comment = metadata.get("Remarks", "")
     
     try:
         date = datetime.strptime(date, "%Y%m%d_%H:%M:%S").strftime("%Y-%m-%d\t%H:%M:%S")
@@ -137,26 +139,40 @@ def process_single_file(file_content: str, original_filename: str) -> Dict[str, 
         # Generate output filename
         orig_basename = original_filename
         original_base = None
+        cycle = 0
+        
         for ext in ("_ivraw.csv", ".jv.csv", ".csv"):
             if orig_basename.lower().endswith(ext):
-                original_base = orig_basename[:-len(ext)]
+                # Remove extension plus 14 extra characters (datetime stamp)
+                original_base = orig_basename[:-len(ext)-14]
+                
+                # Check if cycle 0 exists and modify cycle number accordingly
+                # Files are usually measured in order and sorted in the folder
+                if output_folder:
+                    check_path = os.path.join(output_folder, f"{original_base}.px{scan_index}Cycle_0.jv.csv")
+                    if os.path.exists(check_path):
+                        cycle = 1
+                    else:
+                        cycle = 0
                 break
+        
         if original_base is None:
             original_base = os.path.splitext(orig_basename)[0]
         
-        filename = f"{original_base}.px{scan_index}.jv.csv"
-        content = format_old_file(sample_name, area, is_illuminated, date, forward, reverse)
+        filename = f"{original_base}.px{scan_index}Cycle_{cycle}.jv.csv"
+        content = format_old_file(sample_name, area, is_illuminated, date, forward, reverse, comment)
         results[filename] = content
     
     return results
 
 
-def process_files(files_dict: Dict[str, bytes]) -> Tuple[bytes, int]:
+def process_files(files_dict: Dict[str, bytes], output_folder: str = "") -> Tuple[bytes, int]:
     """
     Process multiple files and return a zip file as bytes
     
     Args:
         files_dict: Dictionary mapping filenames to file content (as bytes)
+        output_folder: Path to output folder (for cycle detection)
     
     Returns:
         Tuple of (zip_file_content, number_of_files_processed)
@@ -178,7 +194,7 @@ def process_files(files_dict: Dict[str, bytes]) -> Tuple[bytes, int]:
                     continue
             
             # Process file
-            results = process_single_file(file_content, filename)
+            results = process_single_file(file_content, filename, output_folder)
             
             # Add results to zip
             for output_name, output_content in results.items():
