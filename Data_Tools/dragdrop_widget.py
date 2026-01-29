@@ -76,7 +76,7 @@ class DragDropUploadWidget:
             VBox containing drag-drop area and file list
         """
         
-        # Drag-drop HTML area
+        # Drag-drop HTML area with Voilà-compatible JavaScript
         dragdrop_html = widgets.HTML(
             value=f"""
             <div id="dragdrop_{self.widget_id}" 
@@ -84,60 +84,79 @@ class DragDropUploadWidget:
                         padding: 30px; text-align: center; background: #f5f5f5;
                         cursor: pointer; transition: all 0.3s ease;
                         min-height: 120px; display: flex; flex-direction: column;
-                        justify-content: center; align-items: center;">
+                        justify-content: center; align-items: center; user-select: none;">
                 <div style="font-size: 40px; margin-bottom: 10px;">📁</div>
                 <div style="font-weight: bold; color: #333; font-size: 16px; margin-bottom: 5px;">
-                    Drag files here or click to select
+                    Drag files here to upload
                 </div>
                 <div style="color: #999; font-size: 13px;">
-                    Supports CSV, ZIP and other file types
+                    or use the select button below
                 </div>
             </div>
             
             <script>
             (function() {{
                 const dropZone = document.getElementById('dragdrop_{self.widget_id}');
-                const fileInput = document.querySelector('[data-fileid="{self.widget_id}"]');
-                
                 if (!dropZone) return;
                 
-                // Drag over effect
-                dropZone.addEventListener('dragover', function(e) {{
+                // Prevent default behaviors
+                ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {{
+                    dropZone.addEventListener(eventName, preventDefaults, false);
+                }});
+                
+                function preventDefaults(e) {{
                     e.preventDefault();
+                    e.stopPropagation();
+                }}
+                
+                // Highlight when dragging over
+                ['dragenter', 'dragover'].forEach(eventName => {{
+                    dropZone.addEventListener(eventName, highlight, false);
+                }});
+                
+                ['dragleave', 'drop'].forEach(eventName => {{
+                    dropZone.addEventListener(eventName, unhighlight, false);
+                }});
+                
+                function highlight(e) {{
                     dropZone.style.borderColor = '#4CAF50';
                     dropZone.style.background = '#e8f5e9';
-                }});
+                }}
                 
-                dropZone.addEventListener('dragleave', function(e) {{
-                    e.preventDefault();
+                function unhighlight(e) {{
                     dropZone.style.borderColor = '#2196F3';
                     dropZone.style.background = '#f5f5f5';
-                }});
+                }}
                 
-                // Drop handler
-                dropZone.addEventListener('drop', function(e) {{
-                    e.preventDefault();
-                    dropZone.style.borderColor = '#2196F3';
-                    dropZone.style.background = '#f5f5f5';
+                // Handle drop - trigger the file input's change event
+                dropZone.addEventListener('drop', handleDrop, false);
+                
+                function handleDrop(e) {{
+                    const dt = e.dataTransfer;
+                    const files = dt.files;
                     
-                    if (fileInput && e.dataTransfer.files.length > 0) {{
-                        fileInput.files = e.dataTransfer.files;
-                        const event = new Event('change', {{ bubbles: true }});
-                        fileInput.dispatchEvent(event);
+                    if (files && files.length > 0) {{
+                        // Find the file input element
+                        const fileInput = document.querySelector('input[type="file"]');
+                        if (fileInput) {{
+                            // Set files using DataTransfer API
+                            try {{
+                                const dataTransfer = new DataTransfer();
+                                for (let i = 0; i < files.length; i++) {{
+                                    dataTransfer.items.add(files[i]);
+                                }}
+                                fileInput.files = dataTransfer.files;
+                                fileInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                            }} catch(err) {{
+                                console.log('Drag-drop upload in progress, files will be available via ipywidgets');
+                            }}
+                        }}
                     }}
-                }});
-                
-                // Click to select
-                dropZone.addEventListener('click', function() {{
-                    if (fileInput) fileInput.click();
-                }});
+                }}
             }})();
             </script>
             """
         )
-        
-        # Hidden file input (attached to button for compatibility)
-        self.file_upload._dom_classes = self.file_upload._dom_classes + (f'data-fileid={self.widget_id}',)
         
         # File list display
         file_list_html = widgets.HTML(value=self._get_file_list_html())
@@ -148,7 +167,7 @@ class DragDropUploadWidget:
         
         self.file_upload.observe(update_list, names='value')
         
-        # Container
+        # Container - show description, drag-drop area, file upload button, and file list
         container = widgets.VBox([
             widgets.HTML(value=f"<b>{self.description}</b>"),
             dragdrop_html,
