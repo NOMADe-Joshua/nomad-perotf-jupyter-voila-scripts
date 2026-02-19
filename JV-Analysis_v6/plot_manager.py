@@ -42,7 +42,7 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
     Parameters:
     -----------
     font_size_axis : int, optional
-        Font size for axis labels and tick labels (default: 12)
+        Font size for axis labels and tick labels (default: 15)
     font_size_title : int, optional
         Font size for plot titles (default: 16)
     font_size_legend : int, optional
@@ -294,7 +294,7 @@ class PlotManager:
     
     def __init__(self):
         self.plot_output_path = ""
-        self.font_size_axis = 12  # Default font size for axis labels
+        self.font_size_axis = 15  # Default font size for axis labels
         self.font_size_title = 16  # Default font size for titles
         self.font_size_legend = 10  # Default font size for legend
         # REMOVED: No more FIXED_CATEGORY_COLORS - only use selected color scheme
