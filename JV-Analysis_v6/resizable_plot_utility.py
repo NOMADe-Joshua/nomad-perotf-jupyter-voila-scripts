@@ -132,7 +132,7 @@ class ResizablePlotWidget:
                 responsive: true,
                 displayModeBar: true,
                 displaylogo: false,
-                modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d'],
+                modeBarButtonsToRemove: ['pan2d', 'lasso2d', 'select2d', 'toImage'],
                 autosizable: false,
                 edits: {{
                     legendPosition: true  // ENABLE: Allow user to drag legend
@@ -166,6 +166,96 @@ class ResizablePlotWidget:
             function initPlot() {{
                 const plotDiv = document.getElementById('{self.plot_id}');
                 const container = document.getElementById('container-{self.plot_id}');
+
+                function triggerBlobDownload(blob, filename) {{
+                    const objectUrl = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = objectUrl;
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    setTimeout(function() {{
+                        URL.revokeObjectURL(objectUrl);
+                    }}, 1000);
+                }}
+
+                // Download SVG: use Plotly.toImage to get a pure SVG data URI,
+                // decode it to a raw SVG string, and save as a clean blob.
+                // No DOM serialization, no HTML context.
+                function downloadSvgViaPlotly(gd, filename) {{
+                    const width = gd.clientWidth || gd.offsetWidth || 1200;
+                    const height = gd.clientHeight || gd.offsetHeight || 800;
+
+                    return Plotly.toImage(gd, {{
+                        format: 'svg',
+                        width: width,
+                        height: height
+                    }}).then(function(dataUri) {{
+                        let svgText;
+
+                        const base64Prefix = 'data:image/svg+xml;base64,';
+                        const plainPrefix  = 'data:image/svg+xml,';
+
+                        if (dataUri.startsWith(base64Prefix)) {{
+                            svgText = atob(dataUri.slice(base64Prefix.length));
+                        }} else if (dataUri.startsWith(plainPrefix)) {{
+                            svgText = decodeURIComponent(dataUri.slice(plainPrefix.length));
+                        }} else {{
+                            throw new Error('Unexpected data URI format: ' + dataUri.slice(0, 40));
+                        }}
+
+                        const blob = new Blob([svgText], {{ type: 'image/svg+xml;charset=utf-8' }});
+                        triggerBlobDownload(blob, filename);
+                    }});
+                }}
+
+                // Download PNG via Plotly.toImage, decode base64, save as proper blob
+                function downloadPngViaPlotly(gd, filename, scale) {{
+                    const width = gd.clientWidth || gd.offsetWidth || 1200;
+                    const height = gd.clientHeight || gd.offsetHeight || 800;
+
+                    return Plotly.toImage(gd, {{
+                        format: 'png',
+                        width: width,
+                        height: height,
+                        scale: scale || 6
+                    }}).then(function(dataUri) {{
+                        const base64Prefix = 'data:image/png;base64,';
+                        if (!dataUri.startsWith(base64Prefix)) {{
+                            throw new Error('Unexpected PNG data URI format');
+                        }}
+                        const byteString = atob(dataUri.slice(base64Prefix.length));
+                        const buf = new Uint8Array(byteString.length);
+                        for (let i = 0; i < byteString.length; i++) {{
+                            buf[i] = byteString.charCodeAt(i);
+                        }}
+                        const blob = new Blob([buf], {{ type: 'image/png' }});
+                        triggerBlobDownload(blob, filename);
+                    }});
+                }}
+
+                const svgDownloadButton = {{
+                    name: 'Download SVG',
+                    icon: Plotly.Icons.camera,
+                    click: function(gd) {{
+                        downloadSvgViaPlotly(gd, 'jv_plot_export.svg').catch(function(err) {{
+                            console.error('❌ SVG download failed:', err);
+                        }});
+                    }}
+                }};
+
+                const pngDownloadButton = {{
+                    name: 'Download PNG (~600dpi)',
+                    icon: Plotly.Icons.camera,
+                    click: function(gd) {{
+                        downloadPngViaPlotly(gd, 'jv_plot_export_600dpi.png', 6).catch(function(err) {{
+                            console.error('❌ PNG download failed:', err);
+                        }});
+                    }}
+                }};
+
+                config.modeBarButtonsToAdd = [svgDownloadButton, pngDownloadButton];
                 
                 if (!plotDiv || !container) {{
                     setTimeout(initPlot, 100);
