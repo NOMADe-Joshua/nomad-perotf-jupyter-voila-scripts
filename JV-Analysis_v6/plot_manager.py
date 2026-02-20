@@ -317,6 +317,39 @@ class PlotManager:
         fig.update_yaxes(titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis))
         return fig
 
+    def _mask_boundary_zero_point(self, voltage_values, current_values, atol=1e-12):
+        """Remove only boundary (0,0) artifacts from JV arrays.
+
+        Keeps valid inner (0,0) points untouched and only removes the first and/or
+        last point if both voltage and current are approximately zero.
+        """
+        v = np.asarray(voltage_values, dtype=float)
+        c = np.asarray(current_values, dtype=float)
+
+        if v.size == 0 or c.size == 0:
+            return [], []
+
+        n = min(len(v), len(c))
+        v = v[:n]
+        c = c[:n]
+
+        valid_mask = ~(np.isnan(v) | np.isnan(c))
+        v = v[valid_mask]
+        c = c[valid_mask]
+
+        if len(v) == 0:
+            return [], []
+
+        if len(v) > 1 and np.isclose(v[0], 0.0, atol=atol) and np.isclose(c[0], 0.0, atol=atol):
+            v = v[1:]
+            c = c[1:]
+
+        if len(v) > 1 and np.isclose(v[-1], 0.0, atol=atol) and np.isclose(c[-1], 0.0, atol=atol):
+            v = v[:-1]
+            c = c[:-1]
+
+        return v.tolist(), c.tolist()
+
     def _extract_rgb_from_color(self, color_string):
         """Extract RGB values from color string"""
         if 'rgba(' in color_string:
@@ -553,6 +586,10 @@ class PlotManager:
                     curve_direction = key
                     
                     if len(voltage_values) > 0 and len(current_values) > 0:
+                        voltage_values, current_values = self._mask_boundary_zero_point(voltage_values, current_values)
+                        if len(voltage_values) == 0 or len(current_values) == 0:
+                            continue
+
                         line_color = base_color
                         line_style = 'solid'
                         marker_symbol = 'circle'
@@ -747,6 +784,10 @@ class PlotManager:
                 direction = pair['direction']
                 
                 if len(voltage_values) > 0 and len(current_values) > 0:
+                    voltage_values, current_values = self._mask_boundary_zero_point(voltage_values, current_values)
+                    if len(voltage_values) == 0 or len(current_values) == 0:
+                        continue
+
                     if direction == 'Reverse':
                         # Forward gets 50% lighter color with solid line and crosses
                         light_r = min(255, int(r + (255 - r) * 0.5))
@@ -933,6 +974,10 @@ class PlotManager:
                     curve_direction = key
                     
                     if len(voltage_values) > 0 and len(current_values) > 0:
+                        voltage_values, current_values = self._mask_boundary_zero_point(voltage_values, current_values)
+                        if len(voltage_values) == 0 or len(current_values) == 0:
+                            continue
+
                         # Use solid line with circles for the best measurement
                         line_color = base_color
                         line_style = 'solid'
@@ -1045,6 +1090,10 @@ class PlotManager:
                 
                 # Skip if no valid data
                 if np.all(pd.isna(voltage_values)) or np.all(pd.isna(current_values)):
+                    continue
+
+                voltage_values, current_values = self._mask_boundary_zero_point(voltage_values, current_values)
+                if len(voltage_values) == 0 or len(current_values) == 0:
                     continue
                 
                 # Group by direction
@@ -1193,6 +1242,10 @@ class PlotManager:
                 
                 # Skip if no valid data
                 if np.all(pd.isna(voltage_values)) or np.all(pd.isna(current_values)):
+                    continue
+
+                voltage_values, current_values = self._mask_boundary_zero_point(voltage_values, current_values)
+                if len(voltage_values) == 0 or len(current_values) == 0:
                     continue
                 
                 # Group by direction
