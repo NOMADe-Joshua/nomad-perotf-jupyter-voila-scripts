@@ -141,9 +141,16 @@ class AuthenticationManager:
     def authenticate_with_token(self, token=None):
         """Authenticate using provided token or environment variable"""
         if token is None:
-            token = os.environ.get('NOMAD_CLIENT_ACCESS_TOKEN')
-            if not token:
-                raise ValueError("Token not found in environment variable 'NOMAD_CLIENT_ACCESS_TOKEN'.")
+            # Try to get token using access_token.py module first (preferred method)
+            try:
+                import access_token
+                # access_token.get_token() handles both ENV and interactive login
+                token = access_token.get_token(self.url_base)
+            except Exception as e:
+                # Fallback to reading environment variable directly
+                token = os.environ.get('NOMAD_CLIENT_ACCESS_TOKEN')
+                if not token:
+                    raise ValueError(f"Token not found. Error from access_token.py: {e}")
         
         self.current_token = token
         return self.current_token

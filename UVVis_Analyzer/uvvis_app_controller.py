@@ -12,8 +12,8 @@ from IPython.display import display, clear_output, Markdown
 import os
 import sys
 
-# Add parent directory
-parent_dir = os.path.dirname(os.path.dirname(os.getcwd()))
+# Add parent directory for shared modules
+parent_dir = os.path.dirname(os.getcwd())
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
@@ -21,6 +21,14 @@ if parent_dir not in sys.path:
 jv_dir = os.path.join(parent_dir, 'JV-Analysis_v6')
 if jv_dir not in sys.path:
     sys.path.append(jv_dir)
+
+# Import shared authentication module (like JV script does)
+try:
+    from auth_manager import AuthenticationManager
+    import access_token
+except ImportError as e:
+    print(f"⚠️ Warning: Could not import shared auth modules: {e}")
+    AuthenticationManager = None
 
 # Now imports should work
 from uvvis_data_manager import UVVisDataManager
@@ -47,99 +55,18 @@ except ImportError:
         )
 
 
-class SimpleAuthManager:
-    """Simplified authentication manager"""
-    
-    def __init__(self, base_url, api_endpoint):
-        self.base_url = base_url
-        self.api_endpoint = api_endpoint
-        self.url = f"{base_url}{api_endpoint}"
-        self.current_token = None
-        self.current_user_info = None
-        self.status_callback = None
-    
-    def set_status_callback(self, callback):
-        self.status_callback = callback
-    
-    def _update_status(self, message, color=None):
-        """Update status through callback if available"""
-        if self.status_callback:
-            self.status_callback(message, color)
-    
-    def authenticate_with_credentials(self, username, password):
-        import requests
-        if not username or not password:
-            raise ValueError("Username and Password required")
-        
-        auth_dict = dict(username=username, password=password)
-        token_url = f"{self.url}/auth/token"
-        
-        try:
-            response = requests.get(token_url, params=auth_dict, timeout=10)
-            response.raise_for_status()
-            
-            token_data = response.json()
-            self.current_token = token_data['access_token']
-            return self.current_token
-        except requests.exceptions.RequestException as e:
-            self._handle_request_error(e)
-            raise
-    
-    def authenticate_with_token(self, token=None):
-        if token is None:
-            token = os.environ.get('NOMAD_CLIENT_ACCESS_TOKEN')
-            if not token:
-                raise ValueError("Token not found in environment variable 'NOMAD_CLIENT_ACCESS_TOKEN'.")
-        self.current_token = token
-        return self.current_token
-    
-    def verify_token(self):
-        import requests
-        if not self.current_token:
-            raise ValueError("No token available for verification.")
-            
-        verify_url = f"{self.url}/users/me"
-        headers = {'Authorization': f'Bearer {self.current_token}'}
-        
-        try:
-            verify_response = requests.get(verify_url, headers=headers, timeout=10)
-            verify_response.raise_for_status()
-            self.current_user_info = verify_response.json()
-            return self.current_user_info
-        except requests.exceptions.RequestException as e:
-            self._handle_request_error(e)
-            raise
-    
-    def _handle_request_error(self, e):
-        """Handle and format request errors consistently"""
-        import json
-        if e.response is not None:
-            try:
-                error_detail = e.response.json().get('detail', e.response.text)
-                if isinstance(error_detail, list):
-                    error_message = f"API Error ({e.response.status_code}): {json.dumps(error_detail)}"
-                else:
-                    error_message = f"API Error ({e.response.status_code}): {error_detail or e.response.text}"
-            except json.JSONDecodeError:
-                error_message = f"API Error ({e.response.status_code}): {e.response.text}"
-        else:
-            error_message = f"Network/API Error: {e}"
-        
-        self._update_status(f'Status: {error_message}', 'red')
-    
-    def is_authenticated(self):
-        return self.current_token is not None
-    
-    def clear_authentication(self):
-        self.current_token = None
-        self.current_user_info = None
-
-
 class UVVisAnalysisApp:
     """Main UVVis analysis application"""
     
     def __init__(self):
-        self.auth_manager = SimpleAuthManager("http://elnserver.lti.kit.edu", "/nomad-oasis/api/v1")
+        # Use shared AuthenticationManager from parent directory (like JV script)
+        if AuthenticationManager:
+            self.auth_manager = AuthenticationManager("http://elnserver.lti.kit.edu", "/nomad-oasis/api/v1")
+        else:
+            # Fallback: create minimal auth manager if shared module not available
+            print("⚠️ Warning: Using fallback authentication - shared auth_manager not found")
+            self.auth_manager = self._create_minimal_auth_manager()
+        
         self.data_manager = UVVisDataManager(self.auth_manager)
         self.plot_manager = UVVisPlotManager()
         
