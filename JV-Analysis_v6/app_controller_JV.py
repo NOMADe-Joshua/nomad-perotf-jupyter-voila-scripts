@@ -16,8 +16,8 @@ import zipfile
 import requests
 import json
 import sys
-from utils import save_combined_excel_data
-from resizable_plot_utility import ResizablePlotManager
+from utils_JV import save_combined_excel_data
+from resizable_plot_utility_JV import ResizablePlotManager
 import openpyxl
 from openpyxl.utils.dataframe import dataframe_to_rows
 import plotly.graph_objects as go
@@ -29,11 +29,11 @@ if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
 # Import the new organized modules
-from gui_components import AuthenticationUI, FilterUI, PlotUI, SaveUI, ColorSchemeSelector, InfoUI
-from font_size_ui import FontSizeUI
-from data_manager import DataManager
-from plot_manager import plotting_string_action
-from utils import save_full_data_frame
+from gui_components_JV import AuthenticationUI, FilterUI, PlotUI, SaveUI, ColorSchemeSelector, InfoUI
+from font_size_ui_JV import FontSizeUI
+from data_manager_JV import DataManager
+from plot_manager_JV import plotting_string_action
+from utils_JV import save_full_data_frame
 from batch_selection import create_batch_selection
 from error_handler import ErrorHandler
 
