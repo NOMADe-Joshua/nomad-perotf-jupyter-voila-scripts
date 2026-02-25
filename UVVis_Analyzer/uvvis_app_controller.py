@@ -35,6 +35,7 @@ from uvvis_data_manager import UVVisDataManager
 from uvvis_plot_manager import UVVisPlotManager
 from uvvis_gui_components import UVVisAuthenticationUI, UVVisBatchSelector, UVVisPlotUI, UVVisSaveUI
 from gui_components import ColorSchemeSelector  # From JV-Analysis
+from font_size_ui_UVVis import FontSizeUI  # From JV-Analysis
 from resizable_plot_utility import ResizablePlotManager  # From JV-Analysis
 
 # Import batch sorting utilities
@@ -83,6 +84,7 @@ class UVVisAnalysisApp:
         self.plot_ui = UVVisPlotUI()
         self.save_ui = UVVisSaveUI()
         self.color_selector = ColorSchemeSelector()
+        self.font_size_ui = FontSizeUI(callback=self._on_font_size_change)
         self.bandgap_download_box = widgets.VBox()
         
         self.load_status_output = widgets.Output(
@@ -98,9 +100,11 @@ class UVVisAnalysisApp:
         ])
         
         plot_tab_content = widgets.VBox([
-            self.plot_ui.get_widget(),
+            self.color_selector.get_widget(),
             widgets.HTML("<hr>"),
-            self.color_selector.get_widget()
+            self.font_size_ui.get_widget(),
+            widgets.HTML("<hr>"),
+            self.plot_ui.get_widget()
         ])
         
         self.tabs = widgets.Tab()
@@ -210,6 +214,19 @@ class UVVisAnalysisApp:
             print(f"🎨 Auto-adjusted color palette: {num_variations} colors for {len(variations)} unique variations")
         
         return num_variations
+
+    def _on_font_size_change(self, axis_size=None, title_size=None, legend_size=None):
+        """Font-size callback from slider UI (applied during plot creation)."""
+        return
+
+    def _apply_font_sizes_to_figure(self, fig, axis_size, title_size, legend_size):
+        """Apply axis/title/legend font sizes to a Plotly figure."""
+        fig.update_layout(
+            title_font=dict(size=title_size),
+            legend=dict(font=dict(size=legend_size))
+        )
+        fig.update_xaxes(title_font=dict(size=axis_size), tickfont=dict(size=axis_size))
+        fig.update_yaxes(title_font=dict(size=axis_size), tickfont=dict(size=axis_size))
     
     def _on_create_plots(self, b):
         if not self.data_manager.has_data():
@@ -285,6 +302,15 @@ class UVVisAnalysisApp:
             
             if not figs:
                 raise ValueError("No plot type selected.")
+
+            # Apply font sizes selected in UI
+            font_sizes = self.font_size_ui.get_font_sizes()
+            axis_size = font_sizes.get('font_size_axis', 12)
+            title_size = font_sizes.get('font_size_title', 16)
+            legend_size = font_sizes.get('font_size_legend', 10)
+
+            for fig in figs:
+                self._apply_font_sizes_to_figure(fig, axis_size, title_size, legend_size)
             
             self.global_plot_data = {'figs': figs, 'names': names}
             
