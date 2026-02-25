@@ -1108,7 +1108,7 @@ class ColorSchemeSelector:
             'D3': px.colors.qualitative.D3,
             'Set1': px.colors.qualitative.Set1,
             'Set2': px.colors.qualitative.Set2,
-            'Default (Current)': [
+            'Default (old)': [
                 'rgba(93, 164, 214, 0.7)', 'rgba(255, 144, 14, 0.7)', 
                 'rgba(44, 160, 101, 0.7)', 'rgba(255, 65, 54, 0.7)', 
                 'rgba(207, 114, 255, 0.7)', 'rgba(127, 96, 0, 0.7)',
@@ -1116,7 +1116,7 @@ class ColorSchemeSelector:
             ]
         }
         
-        self.selected_scheme = 'Default (Current)'
+        self.selected_scheme = 'Viridis'
         self.num_colors = 8  # Default number of colors
         self._create_widgets()
     

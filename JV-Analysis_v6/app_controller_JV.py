@@ -685,16 +685,12 @@ If you tested specific variables or conditions for each sample, please write the
             return
         
         plot_selections = self.plot_ui.get_plot_selections()
-        max_categories = 8  # Default estimate
-        
-        # Estimate how many colors we might need based on the data
-        if hasattr(filtered_data, 'condition'):
-            max_categories = max(max_categories, filtered_data['condition'].nunique())
-        if hasattr(filtered_data, 'status'):
-            max_categories = max(max_categories, filtered_data['status'].nunique())
-        
+
         sampling_method = self.color_selector.sampling_dropdown.value
-        selected_colors = self.color_selector.get_colors(num_colors=max_categories, sampling=sampling_method)
+        selected_colors = self.color_selector.get_colors(
+            num_colors=self.color_selector.num_colors,
+            sampling=sampling_method
+        )
 
         # Show processing message immediately
         with self.plot_ui.plotted_content:
