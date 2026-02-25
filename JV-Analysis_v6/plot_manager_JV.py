@@ -1336,6 +1336,9 @@ class PlotManager:
         var_x should be the GROUPING variable (e.g., 'condition' for "by Variable")
         """
         from plotly.subplots import make_subplots
+
+        def _jsc_positive(value):
+            return abs(value) if pd.notna(value) else value
         
         var_x_map = {
             'sample': 'sample', 'cell': 'cell', 'direction': 'direction',
@@ -1399,17 +1402,20 @@ class PlotManager:
                         hover_data = []
                         for idx, row_data in rev_data.iterrows():
                             condition_val = row_data.get('condition', row_data.get(name_x, 'N/A'))
+                            jsc_value = _jsc_positive(row_data.get('Jsc(mA/cm2)', 'N/A'))
                             hover_data.append([
                                 condition_val,
                                 row_data.get('direction', 'N/A'),
                                 row_data.get('PCE(%)', 'N/A'),
                                 row_data.get('FF(%)', 'N/A'),
-                                row_data.get('Jsc(mA/cm2)', 'N/A'),
+                                jsc_value,
                                 row_data.get('Voc(V)', 'N/A')
                             ])
+
+                        y_values = rev_data[param_name].abs() if param_name == 'Jsc(mA/cm2)' else rev_data[param_name]
                         
                         fig.add_trace(go.Box(
-                            y=rev_data[param_name],
+                            y=y_values,
                             name=f"{key} [R]" if param_idx == 0 else "",
                             x=[x_left] * len(rev_data),
                             boxpoints='all',
@@ -1439,17 +1445,20 @@ class PlotManager:
                         hover_data = []
                         for idx, row_data in fwd_data.iterrows():
                             condition_val = row_data.get('condition', row_data.get(name_x, 'N/A'))
+                            jsc_value = _jsc_positive(row_data.get('Jsc(mA/cm2)', 'N/A'))
                             hover_data.append([
                                 condition_val,
                                 row_data.get('direction', 'N/A'),
                                 row_data.get('PCE(%)', 'N/A'),
                                 row_data.get('FF(%)', 'N/A'),
-                                row_data.get('Jsc(mA/cm2)', 'N/A'),
+                                jsc_value,
                                 row_data.get('Voc(V)', 'N/A')
                             ])
+
+                        y_values = fwd_data[param_name].abs() if param_name == 'Jsc(mA/cm2)' else fwd_data[param_name]
                         
                         fig.add_trace(go.Box(
-                            y=fwd_data[param_name],
+                            y=y_values,
                             name=f"{key} [F]" if param_idx == 0 else "",
                             x=[x_right] * len(fwd_data),
                             boxpoints='all',
@@ -1497,18 +1506,21 @@ class PlotManager:
                     hover_data = []
                     for idx, row_data in group_data.iterrows():
                         condition_val = row_data.get('condition', row_data.get(name_x, 'N/A'))
+                        jsc_value = _jsc_positive(row_data.get('Jsc(mA/cm2)', 'N/A'))
                         hover_data.append([
                             condition_val,
                             row_data.get('direction', 'N/A'),
                             row_data.get('PCE(%)', 'N/A'),
                             row_data.get('FF(%)', 'N/A'),
-                            row_data.get('Jsc(mA/cm2)', 'N/A'),
+                            jsc_value,
                             row_data.get('Voc(V)', 'N/A')
                         ])
+
+                    y_values = group_data[param_name].abs() if param_name == 'Jsc(mA/cm2)' else group_data[param_name]
                     
                     color = distributed_colors[i]
                     fig.add_trace(go.Box(
-                        y=group_data[param_name],
+                        y=y_values,
                         name=str(key) if param_idx == 0 else "",
                         x=[str(key)] * len(group_data),
                         boxpoints='all',
@@ -1599,6 +1611,9 @@ class PlotManager:
 
     def create_boxplot(self, data, var_x, var_y, other_data, data_type="data", colors=None, separate_scan_dir=False):
         """Create normal single-parameter boxplot"""
+        def _jsc_positive(value):
+            return abs(value) if pd.notna(value) else value
+
         var_y_map = {
             'voc': 'Voc(V)', 'jsc': 'Jsc(mA/cm2)', 'ff': 'FF(%)', 'pce': 'PCE(%)',
             'vmpp': 'V_mpp(V)', 'jmpp': 'J_mpp(mA/cm2)', 'pmpp': 'P_mpp(mW/cm2)',
@@ -1643,17 +1658,20 @@ class PlotManager:
                     hover_data = []
                     for idx, row_data in rev_data.iterrows():
                         condition_val = row_data.get('condition', row_data.get(name_x, 'N/A'))
+                        jsc_value = _jsc_positive(row_data.get('Jsc(mA/cm2)', 'N/A'))
                         hover_data.append([
                             condition_val,
                             row_data.get('direction', 'N/A'),
                             row_data.get('PCE(%)', 'N/A'),
                             row_data.get('FF(%)', 'N/A'),
-                            row_data.get('Jsc(mA/cm2)', 'N/A'),
+                            jsc_value,
                             row_data.get('Voc(V)', 'N/A')
                         ])
+
+                    y_values = rev_data[name_y].abs() if name_y == 'Jsc(mA/cm2)' else rev_data[name_y]
                     
                     fig.add_trace(go.Box(
-                        y=rev_data[name_y],
+                        y=y_values,
                         name=f"{key} [R]",
                         x=[x_left] * len(rev_data),
                         boxpoints='all',
@@ -1682,17 +1700,20 @@ class PlotManager:
                     hover_data = []
                     for idx, row_data in fwd_data.iterrows():
                         condition_val = row_data.get('condition', row_data.get(name_x, 'N/A'))
+                        jsc_value = _jsc_positive(row_data.get('Jsc(mA/cm2)', 'N/A'))
                         hover_data.append([
                             condition_val,
                             row_data.get('direction', 'N/A'),
                             row_data.get('PCE(%)', 'N/A'),
                             row_data.get('FF(%)', 'N/A'),
-                            row_data.get('Jsc(mA/cm2)', 'N/A'),
+                            jsc_value,
                             row_data.get('Voc(V)', 'N/A')
                         ])
+
+                    y_values = fwd_data[name_y].abs() if name_y == 'Jsc(mA/cm2)' else fwd_data[name_y]
                     
                     fig.add_trace(go.Box(
-                        y=fwd_data[name_y],
+                        y=y_values,
                         name=f"{key} [F]",
                         x=[x_right] * len(fwd_data),
                         boxpoints='all',
@@ -1736,18 +1757,21 @@ class PlotManager:
                 hover_data = []
                 for idx, row_data in group_data.iterrows():
                     condition_val = row_data.get('condition', row_data.get(name_x, 'N/A'))
+                    jsc_value = _jsc_positive(row_data.get('Jsc(mA/cm2)', 'N/A'))
                     hover_data.append([
                         condition_val,
                         row_data.get('direction', 'N/A'),
                         row_data.get('PCE(%)', 'N/A'),
                         row_data.get('FF(%)', 'N/A'),
-                        row_data.get('Jsc(mA/cm2)', 'N/A'),
+                        jsc_value,
                         row_data.get('Voc(V)', 'N/A')
                     ])
+
+                y_values = group_data[name_y].abs() if name_y == 'Jsc(mA/cm2)' else group_data[name_y]
                 
                 color = distributed_colors[i]
                 fig.add_trace(go.Box(
-                    y=group_data[name_y],
+                    y=y_values,
                     name=str(key),
                     x=[str(key)] * len(group_data),
                     boxpoints='all',
