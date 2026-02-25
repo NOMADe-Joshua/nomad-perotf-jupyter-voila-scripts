@@ -860,7 +860,7 @@ class PlotUI:
             ],
             "Preset 2": [
                 ("Boxplot", "Voc", "by Cell"), 
-                ("Histogram", "Voc", ""),
+                ("JV Curve", "Best device only", ""),
                 ("Boxplot", "all", "by Variable")  # Added
             ],
             "Advanced Analysis": [
@@ -914,7 +914,7 @@ class PlotUI:
     def _create_plot_type_row(self):
         """Create a plot type selection row"""
         plot_type_dropdown = WidgetFactory.create_dropdown(
-            options=['Boxplot', 'Boxplot (omitted)', 'Histogram', 'JV Curve'],
+            options=['Boxplot', 'JV Curve'],
             description='Plot Type:',
             width='100px'
         )
@@ -951,13 +951,6 @@ class PlotUI:
             option2_dropdown.options = ['by Batch', 'by Variable', 'by Sample', 'by Cell', 'by Scan Direction',
                                        'by Status', 'by Status and Variable', 'by Direction and Variable', 'by Cell and Variable',
                                        'by Direction, Status and Variable']
-        elif plot_type == 'Boxplot (omitted)':
-            # ADD 'all' here too for consistency
-            option1_dropdown.options = ['all', 'Voc', 'Jsc', 'FF', 'PCE', 'R_ser', 'R_shu', 'V_mpp', 'J_mpp', 'P_mpp']
-            option2_dropdown.options = ['by Batch', 'by Variable', 'by Sample', 'by Cell', 'by Scan Direction', 'by Status']
-        elif plot_type == 'Histogram':
-            option1_dropdown.options = ['Voc', 'Jsc', 'FF', 'PCE', 'R_ser', 'R_shu', 'V_mpp', 'J_mpp', 'P_mpp']
-            option2_dropdown.options = ['']
         elif plot_type == 'JV Curve':
             option1_dropdown.options = [
                 'All cells', 

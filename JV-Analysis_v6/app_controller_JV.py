@@ -762,10 +762,10 @@ If you tested specific variables or conditions for each sample, please write the
                 if selection_idx < len(plot_selections):
                     plot_type, option1, option2 = plot_selections[selection_idx]
                     
-                    if plot_type == 'Boxplot' or plot_type == 'Boxplot (omitted)':
+                    if plot_type == 'Boxplot':
                         # Generate title and subtitle for boxplot
                         direction_note = " (Separated by Scan Direction)" if separate_scan_dir else ""
-                        datatype = "junk" if "omitted" in plot_type else "data"
+                        datatype = "data"
                         
                         # CRITICAL FIX: Handle 'all' option where option1='all' and option2 contains the x-axis variable
                         if option1 == 'all':
@@ -809,12 +809,6 @@ If you tested specific variables or conditions for each sample, please write the
                         subtitles.append(subtitle)
                         selection_idx += 1
                     
-                    elif plot_type == 'Histogram':
-                        title = f"Histogram of {option1} (Filtered Data)"
-                        titles.append(title)
-                        subtitles.append(None)
-                        selection_idx += 1
-                    
                     elif plot_type == 'JV Curve':
                         # JV Curves use title from figure or generate from option
                         if option1 == 'Best device per condition':
@@ -842,7 +836,7 @@ If you tested specific variables or conditions for each sample, please write the
                             # Check if next figure is still part of this selection
                             if i + 1 >= len(figs) or selection_idx + 1 >= len(plot_selections):
                                 selection_idx += 1
-                    
+
                     else:
                         # Unknown plot type - use filename
                         titles.append(names[i] if i < len(names) else f"Plot {i+1}")
