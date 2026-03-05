@@ -11,7 +11,7 @@ This interactive tool provides a complete workflow for analyzing Maximum Power P
 - Click "Load Data" to import MPPT measurements
 
 The system will automatically process the data by:
-- Inverting power density and current density values (multiply by -1)
+- Converting power density and current density to positive values using absolute value (`abs()`)
 - Converting time units from seconds to hours
 - Loading sample descriptions and metadata
 
