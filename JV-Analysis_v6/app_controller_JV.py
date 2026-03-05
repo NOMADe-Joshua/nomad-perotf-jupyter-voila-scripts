@@ -216,11 +216,10 @@ class JVAnalysisApp:
             self.select_upload_tab,
             self.add_variables_tab,
             self.filter_ui.get_widget(),
-            plot_tab_content,  # CHANGE this line
-            self.save_ui.get_widget()
+            plot_tab_content
         ]
         
-        tab_labels = ['Select Upload', 'Add Variable Names', 'Select Filters', 'Select Plots', 'Save Results']
+        tab_labels = ['Select Upload', 'Add Variable Names', 'Select Filters', 'Select Plots']
         for i, title in enumerate(tab_labels):
             self.tabs.set_title(i, title)
     
@@ -229,7 +228,6 @@ class JVAnalysisApp:
         self.auth_ui.set_success_callback(self._on_auth_success)
         self.filter_ui.set_apply_callback(self._on_apply_filters)
         self.plot_ui.set_plot_callback(self._on_create_plots)
-        self.save_ui.set_save_callbacks(self._on_save_plots, self._on_save_data, self._on_save_all)
         self.default_variables.observe(self._on_change_default_variables, names=['value'])
         self.download_button.on_click(self._download_jv_data)
         self.download_curves_button.on_click(self._download_curves_data)
@@ -859,8 +857,6 @@ If you tested specific variables or conditions for each sample, please write the
                     subtitles=subtitles,
                     container_widget=self.plot_ui.plotted_content
                 )
-                print("Proceed to the next tab to save your results.")
-                self._enable_tab(4)
         
         except Exception as e:
             with self.plot_ui.plotted_content:

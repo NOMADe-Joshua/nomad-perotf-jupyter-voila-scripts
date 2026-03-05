@@ -18,13 +18,25 @@ import ipywidgets as widgets
 class ResizablePlotWidget:
     """Creates resizable Plotly plots for Jupyter notebooks"""
     
-    def __init__(self, fig, title="Plot", initial_width=800, initial_height=600, subtitle=None):  # ADD subtitle parameter
+    def __init__(self, fig, title="Plot", initial_width=800, initial_height=600, subtitle=None, filename=None):
         self.fig = fig
         self.title = title
-        self.subtitle = subtitle  # ADD this line
+        self.subtitle = subtitle
         self.initial_width = initial_width
         self.initial_height = initial_height
         self.plot_id = f"plot_{uuid.uuid4().hex[:8]}"
+        # Compute base filename for download buttons
+        if filename:
+            base = filename
+            for ext in ['.html', '.svg', '.png', '.pdf']:
+                if base.lower().endswith(ext):
+                    base = base[:-len(ext)]
+                    break
+            self.filename_base = base
+        else:
+            safe = str(title).replace(' ', '_').replace('/', '_').replace('\\', '_')
+            safe = ''.join(c for c in safe if c.isalnum() or c in '_-')
+            self.filename_base = safe[:60] if safe else 'jv_plot'
         
     def display(self):
         """Display the resizable plot with external title"""
@@ -235,11 +247,17 @@ class ResizablePlotWidget:
                     }});
                 }}
 
+                function getTimestamp() {{
+                    const now = new Date();
+                    const pad = n => String(n).padStart(2, '0');
+                    return `${{now.getFullYear()}}${{pad(now.getMonth()+1)}}${{pad(now.getDate())}}_${{pad(now.getHours())}}-${{pad(now.getMinutes())}}-${{pad(now.getSeconds())}}_`;
+                }}
+
                 const svgDownloadButton = {{
                     name: 'Download SVG',
                     icon: Plotly.Icons.camera,
                     click: function(gd) {{
-                        downloadSvgViaPlotly(gd, 'jv_plot_export.svg').catch(function(err) {{
+                        downloadSvgViaPlotly(gd, getTimestamp() + '{self.filename_base}.svg').catch(function(err) {{
                             console.error('❌ SVG download failed:', err);
                         }});
                     }}
@@ -249,7 +267,7 @@ class ResizablePlotWidget:
                     name: 'Download PNG (~600dpi)',
                     icon: Plotly.Icons.camera,
                     click: function(gd) {{
-                        downloadPngViaPlotly(gd, 'jv_plot_export_600dpi.png', 6).catch(function(err) {{
+                        downloadPngViaPlotly(gd, getTimestamp() + '{self.filename_base}_600dpi.png', 6).catch(function(err) {{
                             console.error('❌ PNG download failed:', err);
                         }});
                     }}
@@ -339,7 +357,7 @@ class ResizablePlotWidget:
         display(HTML(resizable_html))
 
 
-def create_resizable_plot(fig, title="Plot", width=800, height=600, subtitle=None):  # ADD subtitle
+def create_resizable_plot(fig, title="Plot", width=800, height=600, subtitle=None, filename=None):
     """
     Create a resizable plot from a Plotly figure.
     
@@ -349,14 +367,15 @@ def create_resizable_plot(fig, title="Plot", width=800, height=600, subtitle=Non
         width: Initial width in pixels
         height: Initial height in pixels
         subtitle: Optional subtitle text
+        filename: Base filename (with or without extension) used for download buttons
     
     Returns:
         ResizablePlotWidget instance
     """
-    return ResizablePlotWidget(fig, title, width, height, subtitle)  # PASS subtitle
+    return ResizablePlotWidget(fig, title, width, height, subtitle, filename)
 
 
-def display_resizable_plot(fig, title="Plot", width=800, height=600, subtitle=None):  # ADD subtitle
+def display_resizable_plot(fig, title="Plot", width=800, height=600, subtitle=None, filename=None):
     """
     Convenience function to create and immediately display a resizable plot.
     
@@ -366,8 +385,9 @@ def display_resizable_plot(fig, title="Plot", width=800, height=600, subtitle=No
         width: Initial width in pixels
         height: Initial height in pixels
         subtitle: Optional subtitle text
+        filename: Base filename used for download buttons
     """
-    resizable_plot = create_resizable_plot(fig, title, width, height, subtitle)  # PASS subtitle
+    resizable_plot = create_resizable_plot(fig, title, width, height, subtitle, filename)
     resizable_plot.display()
 
 
@@ -419,8 +439,8 @@ class ResizablePlotManager:
                 else:
                     width, height = 800, 600
                 
-                # Create and display resizable plot WITH TITLE AND SUBTITLE
-                display_resizable_plot(fig, display_title, width, height, subtitle)
+                # Create and display resizable plot WITH TITLE, SUBTITLE AND FILENAME
+                display_resizable_plot(fig, display_title, width, height, subtitle, filename=name)
                 
             except Exception as e:
                 print(f"❌ Error displaying plot {i+1} ({name}): {e}")
