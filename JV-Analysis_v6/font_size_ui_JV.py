@@ -18,13 +18,13 @@ class FontSizeUI:
         -----------
         callback : callable, optional
             Callback function to call when font sizes change
-            Function signature: callback(axis_size, title_size, legend_size)
+            Function signature: callback(axis_size, title_size, legend_size, jv_line_width)
         """
         self.callback = callback
         self.create_widgets()
     
     def create_widgets(self):
-        """Create font size adjustment widgets"""
+        """Create font size and line-width adjustment widgets"""
         
         # Title
         self.title = widgets.HTML(
@@ -32,40 +32,52 @@ class FontSizeUI:
         )
         
         # Axis label font size
-        self.axis_size_slider = widgets.IntSlider(
+        self.axis_size_input = widgets.BoundedIntText(
             value=12,
             min=8,
             max=24,
             step=1,
             description='Axis Labels:',
             style={'description_width': '120px'},
-            layout=widgets.Layout(width='350px')
+            layout=widgets.Layout(width='220px')
         )
-        self.axis_size_slider.observe(self._on_font_size_change, names='value')
+        self.axis_size_input.observe(self._on_font_size_change, names='value')
         
         # Title font size
-        self.title_size_slider = widgets.IntSlider(
+        self.title_size_input = widgets.BoundedIntText(
             value=16,
             min=10,
             max=32,
             step=1,
             description='Title:',
             style={'description_width': '120px'},
-            layout=widgets.Layout(width='350px')
+            layout=widgets.Layout(width='220px')
         )
-        self.title_size_slider.observe(self._on_font_size_change, names='value')
+        self.title_size_input.observe(self._on_font_size_change, names='value')
         
         # Legend font size
-        self.legend_size_slider = widgets.IntSlider(
+        self.legend_size_input = widgets.BoundedIntText(
             value=10,
             min=6,
             max=20,
             step=1,
             description='Legend:',
             style={'description_width': '120px'},
-            layout=widgets.Layout(width='350px')
+            layout=widgets.Layout(width='220px')
         )
-        self.legend_size_slider.observe(self._on_font_size_change, names='value')
+        self.legend_size_input.observe(self._on_font_size_change, names='value')
+
+        # JV curve line width
+        self.jv_line_width_input = widgets.BoundedFloatText(
+            value=2.0,
+            min=1.0,
+            max=8.0,
+            step=0.5,
+            description='JV Line Width:',
+            style={'description_width': '120px'},
+            layout=widgets.Layout(width='220px')
+        )
+        self.jv_line_width_input.observe(self._on_font_size_change, names='value')
         
         # Reset button
         self.reset_button = widgets.Button(
@@ -86,9 +98,10 @@ class FontSizeUI:
         # Container
         self.widget = widgets.VBox([
             self.title,
-            self.axis_size_slider,
-            self.title_size_slider,
-            self.legend_size_slider,
+            self.axis_size_input,
+            self.title_size_input,
+            self.legend_size_input,
+            self.jv_line_width_input,
             widgets.HBox([self.reset_button]),
             self.info_text
         ])
@@ -97,16 +110,18 @@ class FontSizeUI:
         """Handle font size change"""
         if self.callback:
             self.callback(
-                axis_size=self.axis_size_slider.value,
-                title_size=self.title_size_slider.value,
-                legend_size=self.legend_size_slider.value
+                axis_size=self.axis_size_input.value,
+                title_size=self.title_size_input.value,
+                legend_size=self.legend_size_input.value,
+                jv_line_width=self.jv_line_width_input.value
             )
     
     def _on_reset_click(self, button):
         """Reset font sizes to defaults"""
-        self.axis_size_slider.value = 12
-        self.title_size_slider.value = 16
-        self.legend_size_slider.value = 10
+        self.axis_size_input.value = 12
+        self.title_size_input.value = 16
+        self.legend_size_input.value = 10
+        self.jv_line_width_input.value = 2.0
     
     def get_widget(self):
         """Get the font size UI widget"""
@@ -115,7 +130,8 @@ class FontSizeUI:
     def get_font_sizes(self):
         """Get current font size settings as a dictionary"""
         return {
-            'font_size_axis': self.axis_size_slider.value,
-            'font_size_title': self.title_size_slider.value,
-            'font_size_legend': self.legend_size_slider.value
+            'font_size_axis': self.axis_size_input.value,
+            'font_size_title': self.title_size_input.value,
+            'font_size_legend': self.legend_size_input.value,
+            'jv_line_width': self.jv_line_width_input.value
         }

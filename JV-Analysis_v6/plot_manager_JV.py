@@ -35,7 +35,7 @@ def _flatten_multiindex_columns(self, df):
         df.columns = ['_'.join(col).strip() for col in df.columns.values]
     return df
 
-def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=None, separate_scan_dir=False, font_size_axis=None, font_size_title=None, font_size_legend=None):
+def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=None, separate_scan_dir=False, font_size_axis=None, font_size_title=None, font_size_legend=None, jv_line_width=None):
     """
     Main plotting function that processes plot codes and creates figures.
     
@@ -60,6 +60,9 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
     # Set font sizes if provided
     if font_size_axis is not None or font_size_title is not None or font_size_legend is not None:
         plot_manager.set_font_sizes(font_size_axis, font_size_title, font_size_legend)
+
+    if jv_line_width is not None:
+        plot_manager.set_jv_line_width(jv_line_width)
 
     if color_scheme is None:
         color_scheme = [
@@ -149,13 +152,17 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
                    
             elif "Cb" in pl:
                 fig, fig_name = plot_manager.create_jv_best_per_condition_plot(filtered_jv, filtered_curves, colors=color_scheme)
+                fig = plot_manager.apply_jv_line_width_to_figure(fig)
             elif "Cw" in pl:
                 fig, fig_name = plot_manager.create_jv_best_device_plot(filtered_jv, filtered_curves, colors=color_scheme)
+                fig = plot_manager.apply_jv_line_width_to_figure(fig)
             elif "Cy" in pl:
                 fig, fig_name = plot_manager.create_jv_all_cells_plot(complete_jv, filtered_curves, colors=color_scheme)
+                fig = plot_manager.apply_jv_line_width_to_figure(fig)
             elif "Cz" in pl:
                 working_curves = plot_manager._create_matching_curves_data(filtered_jv, complete_curves)
                 fig, fig_name = plot_manager.create_jv_working_cells_plot(filtered_jv, working_curves, colors=color_scheme)
+                fig = plot_manager.apply_jv_line_width_to_figure(fig)
             elif "Co" in pl:
                 if not omitted_jv.empty:
                     rejected_pce_min = omitted_jv['PCE(%)'].min()
@@ -177,21 +184,26 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
                 if not rejected_curves.empty:
                     unique_rejected_devices = rejected_curves.groupby(['sample', 'cell']).size().reset_index()
                 fig, fig_name = plot_manager.create_jv_non_working_cells_plot(omitted_jv, rejected_curves, colors=color_scheme)
+                fig = plot_manager.apply_jv_line_width_to_figure(fig)
             elif "Cx" in pl:
                 figs, fig_names_temp = plot_manager.create_jv_separated_by_cell_plot(complete_jv, complete_curves, colors=color_scheme)  
                 if isinstance(figs, list) and isinstance(fig_names_temp, list):
+                    figs = [plot_manager.apply_jv_line_width_to_figure(f) for f in figs]
                     fig_list.extend(figs)
                     fig_names.extend(fig_names_temp)
                 else:
+                    figs = plot_manager.apply_jv_line_width_to_figure(figs)
                     fig_list.append(figs)
                     fig_names.append(fig_names_temp)
                 continue
             elif "Cd" in pl:
                 figs, fig_names_temp = plot_manager.create_jv_separated_by_substrate_plot(complete_jv, complete_curves, colors=color_scheme, plot_type="all") 
                 if isinstance(figs, list) and isinstance(fig_names_temp, list):
+                    figs = [plot_manager.apply_jv_line_width_to_figure(f) for f in figs]
                     fig_list.extend(figs)
                     fig_names.extend(fig_names_temp)
                 else:
+                    figs = plot_manager.apply_jv_line_width_to_figure(figs)
                     fig_list.append(figs)
                     fig_names.append(fig_names_temp)
                 continue
@@ -216,36 +228,36 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
 def plot_list_from_voila(plot_list):
     """Convert plot selections from UI to plot codes"""
     jvc_dict = {
-        'Voc': 'v', 
-        'Jsc': 'j', 
-        'FF': 'f', 
-        'PCE': 'p', 
-        'R_ser': 'r', 
-        'R_shu': 'h', 
-        'V_mpp': 'u', 
-        'J_mpp': 'i', 
-        'P_mpp': 'm', 
+        'Voc': 'v',
+        'Jsc': 'j',
+        'FF': 'f',
+        'PCE': 'p',
+        'R_ser': 'r',
+        'R_shu': 'h',
+        'V_mpp': 'u',
+        'J_mpp': 'i',
+        'P_mpp': 'm',
         'all': 'all'  # Maps to combined grid boxplot
     }
-    
+
     box_dict = {
-        'by Batch': 'e', 
-        'by Variable': 'g', 
-        'by Sample': 'a', 
-        'by Cell': 'b', 
+        'by Batch': 'e',
+        'by Variable': 'g',
+        'by Sample': 'a',
+        'by Cell': 'b',
         'by Scan Direction': 'c',
-        'by Status': 's', 
-        'by Status and Variable': 'sg', 
-        'by Direction and Variable': 'cg', 
+        'by Status': 's',
+        'by Status and Variable': 'sg',
+        'by Direction and Variable': 'cg',
         'by Cell and Variable': 'bg',
         'by Direction, Status and Variable': 'csg'
     }
 
     cur_dict = {
-        'All cells': 'Cy', 
-        'Only working cells': 'Cz', 
-        'Rejected cells': 'Co', 
-        'Best device only': 'Cw', 
+        'All cells': 'Cy',
+        'Only working cells': 'Cz',
+        'Rejected cells': 'Co',
+        'Best device only': 'Cw',
         'Best device per condition': 'Cb',
         'Separated by cell (all)': 'Cx',
         'Separated by cell (working only)': 'Cxw',
@@ -257,26 +269,22 @@ def plot_list_from_voila(plot_list):
     for plot in plot_list:
         code = ''
         plot_type, option1, option2 = plot
-        
+
         if "omitted" in plot_type:
             code += "J"
             param_code = jvc_dict.get(option1, '')
             code += param_code
-            # Only add box_dict code if NOT "all" parameter
             if param_code != 'all':
                 code += box_dict.get(option2, '')
             else:
-                # For "all", we need the x-axis variable
                 code += box_dict.get(option2, '')
         elif "Boxplot" in plot_type:
             code += "B"
             param_code = jvc_dict.get(option1, '')
             code += param_code
-            # Only add box_dict code if NOT "all" parameter
             if param_code != 'all':
                 code += box_dict.get(option2, '')
             else:
-                # For "all", we need the x-axis variable
                 code += box_dict.get(option2, '')
         elif "Histogram" in plot_type:
             code += "H"
@@ -297,6 +305,7 @@ class PlotManager:
         self.font_size_axis = 15  # Default font size for axis labels
         self.font_size_title = 16  # Default font size for titles
         self.font_size_legend = 10  # Default font size for legend
+        self.jv_line_width = 2.0  # Default JV curve line width
         # REMOVED: No more FIXED_CATEGORY_COLORS - only use selected color scheme
     
     def set_output_path(self, path):
@@ -310,6 +319,30 @@ class PlotManager:
             self.font_size_title = title_size
         if legend_size is not None:
             self.font_size_legend = legend_size
+
+    def set_jv_line_width(self, line_width=None):
+        """Set default JV curve line width for JV curve plots."""
+        if line_width is None:
+            return
+        try:
+            self.jv_line_width = float(line_width)
+        except (TypeError, ValueError):
+            pass
+
+    def apply_jv_line_width_to_figure(self, fig):
+        """Apply JV line width to all line-based scatter traces in a figure."""
+        if fig is None:
+            return fig
+
+        for trace in fig.data:
+            mode = getattr(trace, 'mode', '')
+            trace_type = getattr(trace, 'type', '')
+            if trace_type == 'scatter' and isinstance(mode, str) and 'lines' in mode:
+                if getattr(trace, 'line', None) is None:
+                    trace.line = {}
+                trace.line.width = self.jv_line_width
+
+        return fig
     
     def apply_font_sizes_to_axes(self, fig):
         """Apply current font size settings to a figure's axes"""
@@ -1566,21 +1599,10 @@ class PlotManager:
                 row=row, col=col
             )
 
-        # Title and layout
-        x_axis_display = name_x.replace('_', ' ').title()
-        if name_x == 'condition':
-            x_axis_display = 'Variable'
-        elif name_x == 'batch_for_plotting':
-            x_axis_display = 'Batch'
-
-        title_text = f"Combined Performance Metrics by {x_axis_display}"
-        if separate_scan_dir and 'direction' in data.columns and name_x != 'direction':
-            title_text += " (Reverse/Forward split)"
-        if data_type == "junk":
-            title_text += " (Filtered Out Data)"
-
         fig.update_layout(
-            title=dict(text=title_text, x=0.5, xanchor='center', font=dict(size=self.font_size_title, color='black')),
+            # No internal figure title for combined 'all' boxplots;
+            # axis labels already provide sufficient context.
+            #title=dict(text=''),
             template="plotly_white",
             showlegend=False,
             width=1600,   # 👈 CHANGED: 16:10 aspect ratio width

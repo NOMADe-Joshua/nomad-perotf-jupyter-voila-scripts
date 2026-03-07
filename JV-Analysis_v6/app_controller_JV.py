@@ -8,7 +8,7 @@ __institution__ = "HZb -> KIT"
 __created__ = "September 2025"
 
 import ipywidgets as widgets
-from IPython.display import display, clear_output, Markdown
+from IPython.display import display, clear_output, Markdown, HTML, Javascript
 import os
 import io
 import base64
@@ -22,6 +22,7 @@ import openpyxl
 from openpyxl.utils.dataframe import dataframe_to_rows
 import plotly.graph_objects as go
 import pandas as pd
+from datetime import datetime
 
 # Add parent directory for shared modules
 parent_dir = os.path.dirname(os.getcwd())
@@ -126,6 +127,7 @@ class JVAnalysisApp:
         # Application state
         self.is_conditions = False
         self.global_plot_data = {'figs': [], 'names': [], 'workbook': None}
+        self.selected_batch_ids = []
         
         # Initialize UI components
         self._init_ui_components()
@@ -180,6 +182,18 @@ class JVAnalysisApp:
             layout=widgets.Layout(min_width='150px'),
             disabled=True
         )
+
+        # Download tab widgets
+        self.download_zip_button = widgets.Button(
+            description='Create Download ZIP',
+            button_style='success',
+            icon='download',
+            layout=widgets.Layout(min_width='220px'),
+            disabled=True
+        )
+        self.download_zip_output = widgets.Output(
+            layout=widgets.Layout(border='1px solid #eee', padding='10px', margin='10px 0 0 0')
+        )
     
     def _create_tabs(self):
         """Create tab system"""
@@ -212,14 +226,23 @@ class JVAnalysisApp:
         ])
         
         self.tabs = widgets.Tab()
+
+        self.download_tab = widgets.VBox([
+            widgets.HTML("<h3>Download</h3>"),
+            widgets.HTML("<p>Create one ZIP containing live plots as SVG/PNG plus a variation summary table.</p>"),
+            widgets.HBox([self.download_zip_button]),
+            self.download_zip_output
+        ])
+
         self.tabs.children = [
             self.select_upload_tab,
             self.add_variables_tab,
             self.filter_ui.get_widget(),
-            plot_tab_content
+            plot_tab_content,
+            self.download_tab
         ]
         
-        tab_labels = ['Select Upload', 'Add Variable Names', 'Select Filters', 'Select Plots']
+        tab_labels = ['Select Upload', 'Add Variable Names', 'Select Filters', 'Select Plots', 'Download']
         for i, title in enumerate(tab_labels):
             self.tabs.set_title(i, title)
     
@@ -231,6 +254,7 @@ class JVAnalysisApp:
         self.default_variables.observe(self._on_change_default_variables, names=['value'])
         self.download_button.on_click(self._download_jv_data)
         self.download_curves_button.on_click(self._download_curves_data)
+        self.download_zip_button.on_click(self._on_download_zip_clicked)
     
     def _auto_authenticate(self):
         """Auto-authenticate based on environment"""
@@ -271,6 +295,7 @@ class JVAnalysisApp:
     def _load_data_from_selection(self, batch_selector):
         """Load data from batch selection with user feedback"""
         batch_ids = list(batch_selector.value) if batch_selector.value else []
+        self.selected_batch_ids = batch_ids
         
         success = self.data_manager.load_batch_data(batch_ids, self.load_status_output)
         
@@ -318,6 +343,10 @@ class JVAnalysisApp:
                 print(f"   Unique cells: {data['jvc'].groupby('sample')['cell'].nunique().sum()}")
                 print(f"   Batches: {data['jvc']['batch'].nunique()}")
                 print(f"\n✅ Data ready for variable assignment and filtering!")
+
+            with self.download_zip_output:
+                clear_output(wait=True)
+                display(widgets.HTML("<p><i>Load and plot data first, then use this tab to export everything as one ZIP.</i></p>"))
             
             self._enable_tab(1)
             self.tabs.selected_index = 1
@@ -460,10 +489,11 @@ If you tested specific variables or conditions for each sample, please write the
         """Handle default variables change"""
         self._make_variables_menu()
     
-    def _on_font_size_change(self, axis_size, title_size, legend_size):
+    def _on_font_size_change(self, axis_size, title_size, legend_size, jv_line_width=None):
         """Handle font size changes"""
         # This callback is triggered when font sizes are adjusted in the UI
-        # The actual font sizes are applied during plot creation via plotting_string_action
+        # The actual font and JV curve line settings are applied during plot creation
+        # via plotting_string_action.
         pass
     
     def _download_jv_data(self, e=None):
@@ -847,6 +877,16 @@ If you tested specific variables or conditions for each sample, please write the
             self.global_plot_data['workbook'] = wb
             self.global_plot_data['titles'] = titles
             self.global_plot_data['subtitles'] = subtitles
+            self.download_zip_button.disabled = len(figs) == 0
+
+            with self.download_zip_output:
+                clear_output(wait=True)
+                if figs:
+                    display(widgets.HTML(
+                        "<p><b>Ready:</b> ZIP export can now capture the currently displayed plots (including moved legends) and a summary table.</p>"
+                    ))
+                else:
+                    display(widgets.HTML("<p><i>No plots available yet. Create plots in 'Select Plots' first.</i></p>"))
             
             # Display plots
             with self.plot_ui.plotted_content:
@@ -869,6 +909,473 @@ If you tested specific variables or conditions for each sample, please write the
                 </div>
                 """))
             ErrorHandler.handle_plot_error(e, self.plot_ui.plotted_content)
+
+    def _sanitize_filename(self, value):
+        """Return a filesystem-safe filename stem."""
+        if value is None:
+            return "file"
+        safe = str(value)
+        for ch in '<>:"/\\|?*':
+            safe = safe.replace(ch, '_')
+        safe = safe.strip().strip('.')
+        return safe or "file"
+
+    def _build_variation_summary_df(self):
+        """Create summary table with best and median PCE per upload and variation."""
+        data = self.data_manager.get_data() or {}
+
+        # Prefer filtered data if available; otherwise use full JV data.
+        source_df = data.get('filtered')
+        if source_df is None or source_df.empty:
+            source_df = data.get('jvc')
+
+        if source_df is None or source_df.empty:
+            return pd.DataFrame()
+
+        df = source_df.copy()
+
+        if 'PCE(%)' not in df.columns:
+            return pd.DataFrame()
+
+        # Ensure numeric PCE and drop invalid rows.
+        df['PCE(%)'] = pd.to_numeric(df['PCE(%)'], errors='coerce')
+        df = df.dropna(subset=['PCE(%)'])
+        if df.empty:
+            return pd.DataFrame()
+
+        # Upload name shown in Select Upload is the batch id.
+        upload_col = 'batch' if 'batch' in df.columns else 'display_batch'
+        if upload_col not in df.columns:
+            df[upload_col] = 'unknown_upload'
+
+        # Variation column (condition is the user-assigned variation).
+        variation_col = 'condition' if 'condition' in df.columns else 'identifier'
+        if variation_col not in df.columns:
+            variation_col = upload_col
+
+        # Pixel column for reporting source of PCE.
+        pixel_col = 'px_number' if 'px_number' in df.columns else 'cell'
+        if pixel_col not in df.columns:
+            df[pixel_col] = 'n/a'
+
+        results = []
+        grouped = df.groupby([upload_col, variation_col], dropna=False)
+
+        for (upload_name, variation_name), group in grouped:
+            if group.empty:
+                continue
+
+            best_idx = group['PCE(%)'].idxmax()
+            best_row = group.loc[best_idx]
+
+            median_target = group['PCE(%)'].median()
+            median_row = group.assign(_delta=(group['PCE(%)'] - median_target).abs()) \
+                .sort_values(by=['_delta', 'PCE(%)'], ascending=[True, False]) \
+                .iloc[0]
+
+            results.append({
+                'Variation': str(variation_name),
+                'N measurements': int(len(group)),
+                'Best PCE (%)': round(float(best_row['PCE(%)']), 3),
+                'Best Sample': str(best_row.get('sample', 'n/a')),
+                'Best Pixel': str(best_row.get(pixel_col, 'n/a')),
+                'Best Direction': str(best_row.get('direction', 'n/a')),
+                'Median PCE (%)': round(float(median_row['PCE(%)']), 3),
+                'Median Sample': str(median_row.get('sample', 'n/a')),
+                'Median Pixel': str(median_row.get(pixel_col, 'n/a')),
+                'Median Direction': str(median_row.get('direction', 'n/a')),
+            })
+
+        summary_df = pd.DataFrame(results)
+        if summary_df.empty:
+            return summary_df
+
+        return summary_df.sort_values(by=['Variation']).reset_index(drop=True)
+
+    def _render_summary_table_image_bytes(self, summary_df, image_format='png'):
+        """Render summary DataFrame as an image/PDF table and return bytes."""
+        if summary_df is None or summary_df.empty:
+            return None
+
+        try:
+            import matplotlib.pyplot as plt
+        except Exception:
+            return None
+
+        display_df = summary_df.copy()
+        display_df = display_df.fillna('')
+
+        # Compute variable column widths from content length and emphasize sample columns.
+        col_weights = []
+        for col in display_df.columns:
+            header_len = len(str(col))
+            content_len = display_df[col].astype(str).map(len).max() if not display_df.empty else 0
+            weight = max(header_len, content_len, 8)
+            if col in ('Best Sample', 'Median Sample'):
+                weight = int(weight * 1.7)
+            col_weights.append(weight)
+
+        total_weight = sum(col_weights) if col_weights else 1
+        col_widths = [(w / total_weight) * 0.98 for w in col_weights]
+
+        # Dynamic figure size to keep the table readable for different row counts.
+        fig_width = 20
+        fig_height = max(4, min(0.45 * (len(display_df) + 2), 30))
+
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+        ax.axis('off')
+
+        table = ax.table(
+            cellText=display_df.values,
+            colLabels=display_df.columns,
+            loc='center',
+            cellLoc='center',
+            colWidths=col_widths
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(8)
+        table.scale(1, 1.25)
+
+        # Header styling improves readability in exported assets.
+        for (row, col), cell in table.get_celld().items():
+            if row == 0:
+                cell.set_facecolor('#e9ecef')
+                cell.set_text_props(weight='bold')
+
+        ax.set_title('JV Variation Summary (Best and Median PCE)', fontsize=12, fontweight='bold', pad=12)
+
+        buffer = io.BytesIO()
+        fig.tight_layout()
+        if image_format == 'pdf':
+            fig.savefig(buffer, format='pdf', bbox_inches='tight')
+        else:
+            fig.savefig(buffer, format='png', dpi=250, bbox_inches='tight')
+        plt.close(fig)
+        buffer.seek(0)
+        return buffer.getvalue()
+
+    def _build_download_table_assets(self):
+        """Build summary table assets to include in the combined download ZIP."""
+        summary_df = self._build_variation_summary_df()
+        if summary_df.empty:
+            return []
+
+        assets = []
+
+        csv_bytes = summary_df.to_csv(index=False).encode('utf-8')
+        assets.append({'path': 'table/jv_variation_summary.csv', 'bytes': csv_bytes})
+
+        png_bytes = self._render_summary_table_image_bytes(summary_df, image_format='png')
+        if png_bytes:
+            assets.append({'path': 'table/jv_variation_summary.png', 'bytes': png_bytes})
+
+        pdf_bytes = self._render_summary_table_image_bytes(summary_df, image_format='pdf')
+        if pdf_bytes:
+            assets.append({'path': 'table/jv_variation_summary.pdf', 'bytes': pdf_bytes})
+
+        return assets
+
+    def _on_download_zip_clicked(self, b=None):
+        """Create a single ZIP with live SVG/PNG plots plus summary table files."""
+        if not self.global_plot_data.get('figs'):
+            with self.download_zip_output:
+                clear_output(wait=True)
+                print("No plots available. Create plots in 'Select Plots' first.")
+            return
+
+        plot_names = self.global_plot_data.get('names', [])
+        if not plot_names:
+            plot_names = [f"plot_{idx+1}.html" for idx in range(len(self.global_plot_data.get('figs', [])))]
+
+        table_assets = self._build_download_table_assets()
+
+        js_table_assets = []
+        asset_blob_fields = []
+        for idx, asset in enumerate(table_assets):
+            asset_id = f"jv-table-asset-{idx}"
+            asset_b64 = base64.b64encode(asset['bytes']).decode('ascii')
+            js_table_assets.append({
+                'path': asset['path'],
+                'field_id': asset_id
+            })
+            # Keep large base64 payload out of executable JS to avoid parser limits.
+            asset_blob_fields.append(
+                f"<textarea id='{asset_id}' style='display:none;'>{asset_b64}</textarea>"
+            )
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        zip_name = f"JV_Download_{timestamp}.zip"
+
+        payload = {
+            'zip_name': zip_name,
+            'plot_names': plot_names,
+            'table_assets': js_table_assets
+        }
+        payload_json = json.dumps(payload)
+
+        js_code = f"""
+        (async function() {{
+            const payload = {payload_json};
+            const statusEl = document.getElementById('jv-download-status');
+            const progressEl = document.getElementById('jv-download-progress');
+            const progressTextEl = document.getElementById('jv-download-progress-text');
+
+            function setStatus(text, isError) {{
+                if (!statusEl) return;
+                statusEl.style.color = isError ? '#b00020' : '#1f2937';
+                statusEl.textContent = text;
+            }}
+
+            function setProgress(current, total) {{
+                if (!progressEl || !progressTextEl) return;
+                const safeTotal = Math.max(1, total || 1);
+                const safeCurrent = Math.max(0, Math.min(current || 0, safeTotal));
+                progressEl.max = safeTotal;
+                progressEl.value = safeCurrent;
+                const pct = Math.round((safeCurrent / safeTotal) * 100);
+                progressTextEl.textContent = `${{safeCurrent}}/${{safeTotal}} (${{pct}}%)`;
+            }}
+
+            function sanitizeName(name) {{
+                return String(name || 'plot').replace(/[<>:\\"/\\\\|?*]/g, '_').replace(/\.+$/g, '').trim() || 'plot';
+            }}
+
+            function getBaseName(name, idx) {{
+                const fallback = `plot_${{idx + 1}}`;
+                if (!name) return fallback;
+                const safe = sanitizeName(name);
+                return safe.replace(/\.[a-zA-Z0-9]+$/g, '') || fallback;
+            }}
+
+            async function ensureJsZip() {{
+                if (window.JSZip) return;
+                await new Promise((resolve, reject) => {{
+                    const script = document.createElement('script');
+                    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+                    script.onload = resolve;
+                    script.onerror = () => reject(new Error('Could not load JSZip (network/CSP).'));
+                    document.head.appendChild(script);
+                }});
+            }}
+
+            function triggerBlobDownload(blob, filename) {{
+                const canUseObjectUrl =
+                    typeof window !== 'undefined' &&
+                    window.URL &&
+                    typeof window.URL.createObjectURL === 'function';
+
+                if (canUseObjectUrl) {{
+                    const objectUrl = window.URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = objectUrl;
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    setTimeout(function() {{
+                        try {{
+                            window.URL.revokeObjectURL(objectUrl);
+                        }} catch (e) {{
+                            console.warn('revokeObjectURL warning:', e);
+                        }}
+                    }}, 1000);
+                    return Promise.resolve();
+                }}
+
+                // Fallback for restricted environments where createObjectURL is unavailable.
+                return new Promise((resolve, reject) => {{
+                    try {{
+                        const reader = new FileReader();
+                        reader.onloadend = function() {{
+                            try {{
+                                const link = document.createElement('a');
+                                link.href = reader.result;
+                                link.download = filename;
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                                resolve();
+                            }} catch (err) {{
+                                reject(err);
+                            }}
+                        }};
+                        reader.onerror = function() {{
+                            reject(new Error('FileReader fallback failed.'));
+                        }};
+                        reader.readAsDataURL(blob);
+                    }} catch (err) {{
+                        reject(err);
+                    }}
+                }});
+            }}
+
+            function getImageDimensions(gd) {{
+                if (!gd) return {{ width: 1200, height: 800 }};
+                const fl = gd._fullLayout || {{}};
+                const layoutWidth = Number(fl.width) || 0;
+                const layoutHeight = Number(fl.height) || 0;
+                const domWidth = Number(gd.clientWidth || gd.offsetWidth || 0);
+                const domHeight = Number(gd.clientHeight || gd.offsetHeight || 0);
+                const width = Math.max(layoutWidth, domWidth, 1200);
+                const height = Math.max(layoutHeight, domHeight, 800);
+                return {{ width, height }};
+            }}
+
+            async function toImageWithRetry(gd, opts, retries) {{
+                let lastErr = null;
+                for (let attempt = 1; attempt <= retries; attempt++) {{
+                    try {{
+                        return await Plotly.toImage(gd, opts);
+                    }} catch (err) {{
+                        lastErr = err;
+                        await new Promise(resolve => setTimeout(resolve, 120 * attempt));
+                    }}
+                }}
+                throw lastErr || new Error('toImage failed');
+            }}
+
+            try {{
+                setStatus('Preparing ZIP export...', false);
+                setProgress(0, 1);
+                await ensureJsZip();
+
+                const plotDivs = Array.from(document.querySelectorAll('div.js-plotly-plot[id^="plot_"]'));
+                if (!plotDivs.length) {{
+                    throw new Error('No rendered plots found. Please create plots first.');
+                }}
+
+                const zip = new JSZip();
+                const svgFolder = zip.folder('svg');
+                const pngFolder = zip.folder('png');
+                const warnings = [];
+
+                setProgress(0, plotDivs.length);
+
+                for (let i = 0; i < plotDivs.length; i++) {{
+                    const gd = plotDivs[i];
+                    const baseName = getBaseName(payload.plot_names[i], i);
+
+                    setStatus(`Capturing plot ${{i + 1}} / ${{plotDivs.length}} ...`, false);
+
+                    try {{
+                        if (!gd || !gd.data) {{
+                            throw new Error('Plot container is not ready.');
+                        }}
+
+                        try {{
+                            Plotly.Plots.resize(gd);
+                        }} catch (resizeErr) {{
+                            console.warn('Resize warning:', resizeErr);
+                        }}
+
+                        const dims = getImageDimensions(gd);
+
+                        const svgUri = await toImageWithRetry(gd, {{
+                            format: 'svg',
+                            width: dims.width,
+                            height: dims.height
+                        }}, 3);
+
+                        const svgBase64Prefix = 'data:image/svg+xml;base64,';
+                        const svgPlainPrefix = 'data:image/svg+xml,';
+                        let svgText = '';
+                        if (svgUri.startsWith(svgBase64Prefix)) {{
+                            svgText = atob(svgUri.slice(svgBase64Prefix.length));
+                        }} else if (svgUri.startsWith(svgPlainPrefix)) {{
+                            svgText = decodeURIComponent(svgUri.slice(svgPlainPrefix.length));
+                        }} else {{
+                            throw new Error('Unexpected SVG data URI format.');
+                        }}
+                        svgFolder.file(baseName + '.svg', svgText);
+
+                        const pngUri = await toImageWithRetry(gd, {{
+                            format: 'png',
+                            width: dims.width,
+                            height: dims.height,
+                            scale: 6
+                        }}, 3);
+
+                        const pngPrefix = 'data:image/png;base64,';
+                        if (!pngUri.startsWith(pngPrefix)) {{
+                            throw new Error('Unexpected PNG data URI format.');
+                        }}
+                        pngFolder.file(baseName + '.png', pngUri.slice(pngPrefix.length), {{ base64: true }});
+                    }} catch (plotErr) {{
+                        warnings.push(`Plot ${{i + 1}} (${{baseName}}): ${{plotErr.message || plotErr}}`);
+                        console.error('Plot export error:', plotErr);
+                    }}
+
+                    setProgress(i + 1, plotDivs.length);
+                }}
+
+                if (Array.isArray(payload.table_assets)) {{
+                    for (const asset of payload.table_assets) {{
+                        if (!asset || !asset.path || !asset.field_id) continue;
+                        const field = document.getElementById(asset.field_id);
+                        const b64 = field ? (field.value || '').replace(/\s+/g, '') : '';
+                        if (b64) {{
+                            zip.file(asset.path, b64, {{ base64: true }});
+                        }}
+                    }}
+                }}
+
+                const exportedCount = plotDivs.length - warnings.length;
+                if (exportedCount <= 0) {{
+                    throw new Error('No plots could be exported. Check browser console for details.');
+                }}
+
+                if (warnings.length) {{
+                    zip.file('table/export_warnings.txt', warnings.join('\\n'));
+                }}
+
+                setStatus('Generating ZIP file...', false);
+                const blob = await zip.generateAsync({{ type: 'blob' }});
+                await triggerBlobDownload(blob, payload.zip_name);
+
+                if (warnings.length) {{
+                    setStatus(`Download started: ${{payload.zip_name}} (${{exportedCount}} plots exported, ${{warnings.length}} skipped)`, false);
+                }} else {{
+                    setStatus(`Download started: ${{payload.zip_name}}`, false);
+                }}
+            }} catch (err) {{
+                console.error(err);
+                setStatus('Export failed: ' + (err && err.message ? err.message : err), true);
+            }}
+        }})();
+        """
+
+        # Voila often blocks auto-executed output JS. Use an explicit click action.
+        # Keep onclick tiny and store the JS payload in a hidden textarea.
+        js_code_text = js_code.replace('</textarea>', '<\\/textarea>')
+        onclick_code = (
+            "(function(){"
+            "try{"
+            "var src=document.getElementById('jv-export-js');"
+            "if(!src){throw new Error('Export source not found.');}"
+            "(0,eval)(src.value);"
+            "}catch(e){"
+            "console.error(e);"
+            "var el=document.getElementById('jv-download-status');"
+            "if(el){el.style.color='#b00020';el.textContent='Export failed: '+(e&&e.message?e.message:e);}"
+            "}"
+            "})();"
+        )
+
+        with self.download_zip_output:
+            clear_output(wait=True)
+            display(HTML(f"""
+                <div id='jv-download-status' style='font-weight: 600; margin-bottom: 8px;'>Ready to start export.</div>
+                <div style='display: flex; align-items: center; gap: 10px; margin-bottom: 10px;'>
+                    <progress id='jv-download-progress' value='0' max='1' style='width: 280px; height: 14px;'></progress>
+                    <span id='jv-download-progress-text' style='font-size: 12px; color: #4b5563;'>0/1 (0%)</span>
+                </div>
+                <textarea id='jv-export-js' style='display:none;'>{js_code_text}</textarea>
+                {''.join(asset_blob_fields)}
+                <button onclick="{onclick_code}"
+                        style='background:#198754;color:white;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;'>
+                    Start ZIP Export
+                </button>
+            """))
 
     def _create_matching_curves_from_filtered_jv(self, filtered_jv_data, original_curves_data):
         """Create curves data that exactly matches filtered JV data using sample_id"""

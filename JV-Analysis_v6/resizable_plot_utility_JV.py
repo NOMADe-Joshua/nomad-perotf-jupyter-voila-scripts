@@ -70,7 +70,17 @@ class ResizablePlotWidget:
         
         # CRITICAL FIX: Title is now OUTSIDE the resizable container
         resizable_html = f'''
-        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+        <script>
+        // Use an explicit modern Plotly.js version and load it only once.
+        (function() {{
+            if (typeof window.Plotly !== 'undefined') return;
+            if (document.getElementById('jv-plotly-cdn')) return;
+            var script = document.createElement('script');
+            script.id = 'jv-plotly-cdn';
+            script.src = 'https://cdn.plot.ly/plotly-2.35.2.min.js';
+            document.head.appendChild(script);
+        }})();
+        </script>
         
         <div style="margin: 20px 0;">
             {title_html}
@@ -309,7 +319,14 @@ class ResizablePlotWidget:
                         const observer = new ResizeObserver(function(entries) {{
                             clearTimeout(resizeTimeout);
                             resizeTimeout = setTimeout(function() {{
+                                if (!container || !plotDiv || !container.isConnected || !plotDiv.isConnected) {{
+                                    return;
+                                }}
+
                                 const rect = container.getBoundingClientRect();
+                                if (!rect || !isFinite(rect.width) || !isFinite(rect.height) || rect.width <= 0 || rect.height <= 0) {{
+                                    return;
+                                }}
                                 
                                 const updateLayout = {{
                                     width: rect.width,
@@ -324,7 +341,9 @@ class ResizablePlotWidget:
                                 }}
                                 
                                 console.log('Resizing to:', updateLayout);
-                                Plotly.relayout(plotDiv, updateLayout);
+                                if (typeof Plotly !== 'undefined' && plotDiv && plotDiv.data) {{
+                                    Plotly.relayout(plotDiv, updateLayout);
+                                }}
                             }}, 100);  // Increased debounce to reduce redraws
                         }});
                         observer.observe(container);
