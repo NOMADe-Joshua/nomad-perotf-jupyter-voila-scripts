@@ -976,11 +976,11 @@ If you tested specific variables or conditions for each sample, please write the
             results.append({
                 'Variation': str(variation_name),
                 'N measurements': int(len(group)),
-                'Best PCE (%)': round(float(best_row['PCE(%)']), 3),
+                'Best PCE (%)': round(float(best_row['PCE(%)']), 2),
                 'Best Sample': str(best_row.get('sample', 'n/a')),
                 'Best Pixel': str(best_row.get(pixel_col, 'n/a')),
                 'Best Direction': str(best_row.get('direction', 'n/a')),
-                'Median PCE (%)': round(float(median_row['PCE(%)']), 3),
+                'Median PCE (%)': round(float(median_row['PCE(%)']), 2),
                 'Median Sample': str(median_row.get('sample', 'n/a')),
                 'Median Pixel': str(median_row.get(pixel_col, 'n/a')),
                 'Median Direction': str(median_row.get('direction', 'n/a')),
