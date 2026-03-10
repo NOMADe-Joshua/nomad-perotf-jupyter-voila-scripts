@@ -96,10 +96,10 @@ def rename_jv_files(files_dict, cycle_to_keep, preserve_cycle):
         {new_filename: content_bytes}
     """
     rename_patterns = {
-        "_01_C": ".px1_C",
-        "_02_C": ".px2_C",
-        "_03_C": ".px3_C",
-        "_04_C": ".px4_C"
+        "_01_C": ".px1C",
+        "_02_C": ".px2C",
+        "_03_C": ".px3C",
+        "_04_C": ".px4C"
     }
     
     renamed_files = {}
