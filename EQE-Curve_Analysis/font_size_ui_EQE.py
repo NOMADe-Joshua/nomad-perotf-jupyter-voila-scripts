@@ -59,6 +59,17 @@ class FontSizeUI:
         )
         self.vline_width_input.observe(self._on_change, names="value")
 
+        self.jsc_line_width_input = widgets.BoundedFloatText(
+            value=1.5,
+            min=0.5,
+            max=6.0,
+            step=0.5,
+            description="Jsc Line Width:",
+            style={"description_width": "120px"},
+            layout=widgets.Layout(width="220px"),
+        )
+        self.jsc_line_width_input.observe(self._on_change, names="value")
+
         self.reset_button = widgets.Button(
             description="Reset to Default",
             button_style="info",
@@ -74,6 +85,7 @@ class FontSizeUI:
                 self.legend_size_input,
                 self.eqe_line_width_input,
                 self.vline_width_input,
+                self.jsc_line_width_input,
                 widgets.HBox([self.reset_button]),
             ]
         )
@@ -85,6 +97,7 @@ class FontSizeUI:
                 legend_size=self.legend_size_input.value,
                 jv_line_width=self.eqe_line_width_input.value,
                 vline_width=self.vline_width_input.value,
+                jsc_line_width=self.jsc_line_width_input.value,
             )
 
     def _on_reset(self, _button):
@@ -92,6 +105,7 @@ class FontSizeUI:
         self.legend_size_input.value = 10
         self.eqe_line_width_input.value = 2.0
         self.vline_width_input.value = 1.5
+        self.jsc_line_width_input.value = 1.5
 
     def get_widget(self):
         return self.widget
@@ -102,4 +116,5 @@ class FontSizeUI:
             "font_size_legend": self.legend_size_input.value,
             "jv_line_width": self.eqe_line_width_input.value,
             "vline_width": self.vline_width_input.value,
+            "jsc_line_width": self.jsc_line_width_input.value,
         }

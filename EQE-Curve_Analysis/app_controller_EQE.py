@@ -138,8 +138,8 @@ class EQEAnalysisApp:
         self.remove_filter_button = widgets.Button(description="Remove Filter", button_style="", icon="minus")
         self.apply_filters_button = widgets.Button(description="Apply Filters", button_style="primary")
 
-        self.wavelength_min = widgets.BoundedFloatText(value=300.0, min=0.0, max=4000.0, step=1.0, description="WL min:")
-        self.wavelength_max = widgets.BoundedFloatText(value=900.0, min=0.0, max=4000.0, step=1.0, description="WL max:")
+        self.wavelength_min = widgets.BoundedFloatText(value=0.0, min=0.0, max=4000.0, step=1.0, description="WL min:")
+        self.wavelength_max = widgets.BoundedFloatText(value=4000.0, min=0.0, max=4000.0, step=1.0, description="WL max:")
 
         # --- Cycle filter ---
         self.cycle_mode_toggle = widgets.ToggleButtons(
@@ -239,6 +239,7 @@ class EQEAnalysisApp:
             "font_size_legend": 10,
             "jv_line_width": 2.0,
             "vline_width": 1.5,
+            "jsc_line_width": 1.5,
         }
 
     def _create_tabs(self):
@@ -310,6 +311,20 @@ class EQEAnalysisApp:
         else:
             self.cycle_manual_select.layout.display = "none"
 
+    def _update_wavelength_range_from_data(self):
+        """Set WL min/max widgets to the actual min/max wavelengths in the loaded data."""
+        data = self.data_manager.get_data()
+        curves = data.get("curves", pd.DataFrame())
+        if curves.empty or "wavelength_array" not in curves.columns:
+            return
+        wl = pd.to_numeric(curves["wavelength_array"], errors="coerce").dropna()
+        if wl.empty:
+            return
+        wl_min = float(np.floor(wl.min()))
+        wl_max = float(np.ceil(wl.max()))
+        self.wavelength_min.value = wl_min
+        self.wavelength_max.value = wl_max
+
     def _update_cycle_filter_widget(self):
         """Show/hide cycle filter based on whether multiple cycles exist in loaded data."""
         data = self.data_manager.get_data()
@@ -373,6 +388,7 @@ class EQEAnalysisApp:
             print("Data loaded.")
 
         self._update_cycle_filter_widget()
+        self._update_wavelength_range_from_data()
         self._make_variables_menu()
         self.tabs.selected_index = 1
 
@@ -554,6 +570,7 @@ class EQEAnalysisApp:
             show_eg_vline=self.show_eg_vline_checkbox.value,
             vline_width=self.font_settings.get("vline_width", 1.5),
             show_jsc_cumulative=self.show_jsc_cumulative_checkbox.value,
+            jsc_line_width=self.font_settings.get("jsc_line_width", 1.5),
         )
 
         if fig is None:
@@ -569,13 +586,15 @@ class EQEAnalysisApp:
             clear_output(wait=True)
             ResizablePlotManager.display_plots_resizable([fig], ["eqe_curves"], container_widget=self.plot_output)
 
-    def _on_font_size_change(self, axis_size, legend_size, jv_line_width=None, vline_width=None):
+    def _on_font_size_change(self, axis_size, legend_size, jv_line_width=None, vline_width=None, jsc_line_width=None):
         self.font_settings["font_size_axis"] = axis_size
         self.font_settings["font_size_legend"] = legend_size
         if jv_line_width is not None:
             self.font_settings["jv_line_width"] = float(jv_line_width)
         if vline_width is not None:
             self.font_settings["vline_width"] = float(vline_width)
+        if jsc_line_width is not None:
+            self.font_settings["jsc_line_width"] = float(jsc_line_width)
 
     def _download_filtered_data(self, _=None):
         data = self.data_manager.get_data()
@@ -598,6 +617,16 @@ class EQEAnalysisApp:
     # Download ZIP  (live SVG + ~600 dpi PNG + summary table)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _classify_junction(positions):
+        """Return 'SJ', 'Tandem', or 'TJ' based on the set of multijunction positions."""
+        pos_set = {str(p).strip().lower() for p in positions if p and str(p).strip()}
+        if not pos_set:
+            return "SJ"
+        if "mid" in pos_set or "middle" in pos_set or len(pos_set) >= 3:
+            return "TJ"
+        return "Tandem"
+
     def _build_eqe_summary_df(self):
         """Build a flat summary table of all filtered EQE measurements."""
         filtered_params, _ = self._build_plot_dataframe()
@@ -612,12 +641,14 @@ class EQEAnalysisApp:
             vocrad  = pd.to_numeric(row.get("voc_rad"),          errors="coerce")
             ue_raw  = pd.to_numeric(row.get("urbach_energy"),    errors="coerce")
             lb      = row.get("light_bias", "")
+            pos     = str(row.get("multijunction_position", "")).strip() \
+                      if "multijunction_position" in filtered_params.columns else ""
             rows.append({
                 "Variable Name":  str(row.get("plot_group", row.get("sample_id", ""))),
-                "File":           str(row.get("entry_name", "")),
                 "Sample":         str(row.get("sample_id", "")),
                 "Pixel":          str(row.get("pixel", "")),
                 "Cycle":          str(row.get("cycle", "")),
+                "Position":       pos,
                 "Eg (eV)":        round(float(eg),      3) if pd.notna(eg)     else "",
                 "Jsc (mA/cm²)":   round(float(jsc),     2) if pd.notna(jsc)    else "",
                 "J0rad (mA/cm²)": f"{float(j0raw)*0.1:.2e}"  if pd.notna(j0raw)  else "",
@@ -625,7 +656,23 @@ class EQEAnalysisApp:
                 "UE (meV)":       round(float(ue_raw)*1000, 1) if pd.notna(ue_raw) else "",
                 "LB":             str(lb) if lb else "",
             })
-        return pd.DataFrame(rows)
+        df = pd.DataFrame(rows)
+
+        # Add Junction Type column computed per device (Variable Name + Sample + Pixel + Cycle)
+        if "Position" in df.columns:
+            device_jtype = (
+                df.groupby(["Variable Name", "Sample", "Pixel", "Cycle"])["Position"]
+                .apply(self._classify_junction)
+                .rename("Junction Type")
+                .reset_index()
+            )
+            df = df.merge(device_jtype, on=["Variable Name", "Sample", "Pixel", "Cycle"], how="left")
+            # Drop Position column when all are SJ (no multijunction entries)
+            all_sj = (df.get("Junction Type", pd.Series(["SJ"])) == "SJ").all()
+            if all_sj and (df["Position"] == "").all():
+                df = df.drop(columns=["Position", "Junction Type"])
+
+        return df
 
     def _render_summary_table_image_bytes(self, summary_df, image_format="png"):
         """Render summary DataFrame as a PNG table and return bytes."""

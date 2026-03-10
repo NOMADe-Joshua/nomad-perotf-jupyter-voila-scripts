@@ -354,8 +354,9 @@ class DataManagerEQE:
             return self.data
 
         params_df = pd.DataFrame(params_rows)
+        _STRING_PARAM_COLUMNS = {"multijunction_position"}
         for col in self.PARAM_COLUMNS:
-            if col in params_df.columns:
+            if col in params_df.columns and col not in _STRING_PARAM_COLUMNS:
                 params_df[col] = pd.to_numeric(params_df[col], errors="coerce")
 
         curves_df = pd.concat(curve_frames, ignore_index=True)
@@ -622,20 +623,59 @@ class DataManagerEQE:
             passing = params[passing_mask].copy()
 
             if cycle_mode == "best":
-                # For each (sample_id, pixel), keep the cycle with the highest integrated_jsc.
-                # Falls back to first occurrence if metric is unavailable for all rows.
-                pixel_str = passing["pixel"].fillna("").astype(str) if "pixel" in passing.columns else pd.Series("", index=passing.index)
-                group_key = passing["sample_id"].astype(str) + "||" + pixel_str
-                passing["_grp"] = group_key
-                if "integrated_jsc" in passing.columns:
-                    passing["_metric"] = pd.to_numeric(passing["integrated_jsc"], errors="coerce").fillna(-np.inf)
+                # --- Separate SJ and MJ rows ---
+                has_pos = "multijunction_position" in passing.columns
+                if has_pos:
+                    mj_mask = passing["multijunction_position"].fillna("").astype(str).str.strip().ne("")
                 else:
-                    passing["_metric"] = 0.0
-                best_idx = passing.groupby("_grp")["_metric"].idxmax()
-                removed = passing.index.difference(best_idx)
-                if len(removed) > 0:
-                    params.loc[removed, "filter_reason"] += "cycle: not best EQE, "
-                    reasons.append(f"cycle filter: best EQE per pixel kept ({len(removed)} cycles removed)")
+                    mj_mask = pd.Series(False, index=passing.index)
+
+                sj_passing = passing[~mj_mask]
+                mj_passing = passing[mj_mask]
+
+                removed_idx = []
+
+                # SJ: group by (sample_id, pixel), keep the row with highest integrated_jsc per group
+                if not sj_passing.empty:
+                    pixel_str_sj = sj_passing["pixel"].fillna("").astype(str) if "pixel" in sj_passing.columns else pd.Series("", index=sj_passing.index)
+                    sj_passing = sj_passing.copy()
+                    sj_passing["_grp"] = sj_passing["sample_id"].astype(str) + "||" + pixel_str_sj
+                    if "integrated_jsc" in sj_passing.columns:
+                        sj_passing["_metric"] = pd.to_numeric(sj_passing["integrated_jsc"], errors="coerce").fillna(-np.inf)
+                    else:
+                        sj_passing["_metric"] = 0.0
+                    best_sj_idx = sj_passing.groupby("_grp")["_metric"].idxmax()
+                    removed_idx.extend(sj_passing.index.difference(best_sj_idx).tolist())
+
+                # MJ: for each (sample_id, pixel) group, find the best top sub-cell,
+                # then keep ALL sub-cells sharing the same (sample_id, pixel, cycle).
+                if not mj_passing.empty:
+                    pixel_str_mj = mj_passing["pixel"].fillna("__nan__").astype(str) if "pixel" in mj_passing.columns else pd.Series("__nan__", index=mj_passing.index)
+                    cycle_str_mj = mj_passing["cycle"].fillna("__nan__").astype(str) if "cycle" in mj_passing.columns else pd.Series("__nan__", index=mj_passing.index)
+                    mj_passing = mj_passing.copy()
+                    mj_passing["_dev_grp"] = mj_passing["sample_id"].astype(str) + "||" + pixel_str_mj
+                    mj_passing["_dev_cycle"] = mj_passing["_dev_grp"] + "||" + cycle_str_mj
+
+                    if "integrated_jsc" in mj_passing.columns:
+                        mj_passing["_metric"] = pd.to_numeric(mj_passing["integrated_jsc"], errors="coerce").fillna(-np.inf)
+                    else:
+                        mj_passing["_metric"] = 0.0
+
+                    # For each (sample_id, pixel) group pick the best top sub-cell;
+                    # fall back to any sub-cell if no "top" exists.
+                    keep_device_cycles = set()
+                    for grp_key, grp in mj_passing.groupby("_dev_grp"):
+                        top_rows = grp[grp["multijunction_position"].fillna("").astype(str).str.strip() == "top"]
+                        candidate = top_rows if not top_rows.empty else grp
+                        best_row = candidate.loc[candidate["_metric"].idxmax()]
+                        keep_device_cycles.add(best_row["_dev_cycle"])
+
+                    removed_mj = mj_passing[~mj_passing["_dev_cycle"].isin(keep_device_cycles)].index
+                    removed_idx.extend(removed_mj.tolist())
+
+                if removed_idx:
+                    params.loc[removed_idx, "filter_reason"] += "cycle: not best EQE, "
+                    reasons.append(f"cycle filter: best EQE per pixel kept ({len(removed_idx)} cycles removed)")
 
             elif cycle_mode == "manual" and selected_cycles:
                 cycle_set = set(selected_cycles)
