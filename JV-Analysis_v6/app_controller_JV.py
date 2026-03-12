@@ -33,7 +33,7 @@ if parent_dir not in sys.path:
 from gui_components_JV import AuthenticationUI, FilterUI, PlotUI, SaveUI, ColorSchemeSelector, InfoUI
 from font_size_ui_JV import FontSizeUI
 from data_manager_JV import DataManager
-from plot_manager_JV import plotting_string_action
+from plot_manager_JV import plotting_string_action, PlotManager
 from utils_JV import save_full_data_frame
 from batch_selection import create_batch_selection
 from error_handler import ErrorHandler
@@ -43,6 +43,48 @@ try:
     from api_calls import get_all_measurements_except_JV, get_ids_in_batch
 except ImportError:
     print("Warning: Some API modules not available")
+
+
+# ── PptxGenJS library loader ──────────────────────────────────────────────────
+# The library is downloaded ONCE from the CDN by the Python server and cached
+# locally.  On every PPTX button-click it is injected inline into the page so
+# the user's browser never needs to reach any CDN.
+_PPTXGENJS_CDN   = 'https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js'
+_PPTXGENJS_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.pptxgen_cache.js')
+
+def _load_pptxgenjs():
+    """Return PptxGenJS bundle as a string, downloading and caching on first use."""
+    # Memory cache
+    mem = getattr(_load_pptxgenjs, '_content', None)
+    if mem:
+        return mem
+    # Disk: user-placed file takes priority, then our own cache
+    for path in [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pptxgen.bundled.js'),
+        _PPTXGENJS_CACHE,
+    ]:
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as fh:
+                    _load_pptxgenjs._content = fh.read()
+                return _load_pptxgenjs._content
+            except Exception:
+                pass
+    # Server-side download (browser is never involved)
+    try:
+        resp = requests.get(_PPTXGENJS_CDN, timeout=30)
+        resp.raise_for_status()
+        content = resp.text
+        try:
+            with open(_PPTXGENJS_CACHE, 'w', encoding='utf-8') as fh:
+                fh.write(content)
+        except Exception:
+            pass
+        _load_pptxgenjs._content = content
+        return content
+    except Exception:
+        return None
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 class SimpleAuthManager:
@@ -194,6 +236,17 @@ class JVAnalysisApp:
         self.download_zip_output = widgets.Output(
             layout=widgets.Layout(border='1px solid #eee', padding='10px', margin='10px 0 0 0')
         )
+
+        self.download_pptx_button = widgets.Button(
+            description='Download Summary PPTX',
+            button_style='warning',
+            icon='file-powerpoint-o',
+            layout=widgets.Layout(min_width='220px'),
+            disabled=True
+        )
+        self.download_pptx_output = widgets.Output(
+            layout=widgets.Layout(border='1px solid #eee', padding='10px', margin='10px 0 0 0')
+        )
     
     def _create_tabs(self):
         """Create tab system"""
@@ -230,8 +283,9 @@ class JVAnalysisApp:
         self.download_tab = widgets.VBox([
             widgets.HTML("<h3>Download</h3>"),
             widgets.HTML("<p>Create one ZIP containing live plots as SVG/PNG plus a variation summary table.</p>"),
-            widgets.HBox([self.download_zip_button]),
-            self.download_zip_output
+            widgets.HBox([self.download_zip_button, self.download_pptx_button]),
+            self.download_zip_output,
+            self.download_pptx_output
         ])
 
         self.tabs.children = [
@@ -255,6 +309,7 @@ class JVAnalysisApp:
         self.download_button.on_click(self._download_jv_data)
         self.download_curves_button.on_click(self._download_curves_data)
         self.download_zip_button.on_click(self._on_download_zip_clicked)
+        self.download_pptx_button.on_click(self._on_download_pptx_clicked)
     
     def _auto_authenticate(self):
         """Auto-authenticate based on environment"""
@@ -878,6 +933,7 @@ If you tested specific variables or conditions for each sample, please write the
             self.global_plot_data['titles'] = titles
             self.global_plot_data['subtitles'] = subtitles
             self.download_zip_button.disabled = len(figs) == 0
+            self.download_pptx_button.disabled = len(figs) == 0
 
             with self.download_zip_output:
                 clear_output(wait=True)
@@ -1053,6 +1109,235 @@ If you tested specific variables or conditions for each sample, please write the
         plt.close(fig)
         buffer.seek(0)
         return buffer.getvalue()
+
+    def _on_download_pptx_clicked(self, b=None):
+        """
+        Capture live plot images from the browser (same mechanism as the ZIP
+        download) and assemble a PPTX via PptxGenJS injected inline from the
+        server-cached bundle -- the browser makes NO CDN request.
+        """
+        names = self.global_plot_data.get('names', [])
+        figs  = self.global_plot_data.get('figs',  [])
+
+        # Indices of the two target plots inside the rendered figure list.
+        jv_idx  = next((i for i, n in enumerate(names) if 'JV_best_per_condition' in str(n)), None)
+        box_idx = next((i for i, n in enumerate(names) if 'Boxplot_Combined'      in str(n)), None)
+
+        # ── Kaleido fallback for plots not present in this session ────────────
+        def _kaleido_b64(fig):
+            if fig is None:
+                return ''
+            try:
+                import plotly.io as pio
+                png = pio.to_image(fig, format='png', width=1400, height=860, scale=2)
+                return base64.b64encode(png).decode('ascii')
+            except Exception:
+                return ''
+
+        jv_fb  = ''
+        box_fb = ''
+
+        if jv_idx is None or box_idx is None:
+            data            = self.data_manager.get_data() or {}
+            filtered_jv     = data.get('filtered')
+            filtered_curves = data.get('filtered_curves', data.get('curves'))
+
+            if filtered_jv is not None and not filtered_jv.empty:
+                sampling = self.color_selector.sampling_dropdown.value
+                n_cond   = max(1, filtered_jv['condition'].nunique()) if 'condition' in filtered_jv.columns else 1
+                colors   = self.color_selector.get_colors(num_colors=n_cond, sampling=sampling)
+                pm       = PlotManager()
+
+                if jv_idx is None:
+                    try:
+                        fig, _ = pm.create_jv_best_per_condition_plot(
+                            filtered_jv, filtered_curves, colors=colors)
+                        jv_fb = _kaleido_b64(pm.apply_jv_line_width_to_figure(fig))
+                    except Exception:
+                        pass
+
+                if box_idx is None:
+                    var_x      = 'condition' if 'condition' in filtered_jv.columns else 'sample'
+                    omitted_jv = data.get('junk', pd.DataFrame())
+                    try:
+                        fig, _ = pm.create_combined_boxplot_grid(
+                            filtered_jv, var_x,
+                            [omitted_jv, self.data_manager.get_filter_parameters()],
+                            'data', colors=colors)
+                        box_fb = _kaleido_b64(fig)
+                    except Exception:
+                        pass
+
+        batch_str  = ', '.join(str(b) for b in (self.selected_batch_ids or [])) or '-'
+        timestamp  = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename   = f'JV_Summary_{timestamp}.pptx'
+
+        jv_fb_id   = 'jv-pptx-fb-jv'
+        box_fb_id  = 'jv-pptx-fb-box'
+
+        payload_json = json.dumps({
+            'jv_idx':    jv_idx  if jv_idx  is not None else -1,
+            'box_idx':   box_idx if box_idx is not None else -1,
+            'batch_str': batch_str,
+            'filename':  filename,
+        })
+
+        # ── Load PptxGenJS -- server downloads once + caches; browser offline ─
+        pptxgen_js = _load_pptxgenjs()
+        if pptxgen_js is None:
+            with self.download_pptx_output:
+                clear_output(wait=True)
+                display(HTML(
+                    '<div style="color:#b00020;padding:6px 0;font-size:13px;">'
+                    'Could not load PptxGenJS (CDN unreachable, no local cache).<br>'
+                    'Download <b>pptxgen.bundled.js</b> from '
+                    'https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundled.js '
+                    'and place it in the JV-Analysis_v6 folder on the server, then retry.'
+                    '</div>'
+                ))
+            return
+
+        js_code = f"""
+(async function() {{
+    const payload  = {payload_json};
+    const jvFbId   = '{jv_fb_id}';
+    const boxFbId  = '{box_fb_id}';
+    const statusEl = document.getElementById('jv-pptx-status');
+    function setStatus(msg, isError) {{
+        if (!statusEl) return;
+        statusEl.style.color = isError ? '#b00020' : '#1f2937';
+        statusEl.textContent = msg;
+    }}
+
+    async function capturePlot(idx) {{
+        if (idx < 0) return null;
+        const divs = Array.from(document.querySelectorAll('.js-plotly-plot'));
+        if (idx >= divs.length) return null;
+        const gd = divs[idx];
+        try {{
+            try {{ Plotly.Plots.resize(gd); }} catch(_) {{}}
+            const rect = gd.getBoundingClientRect();
+            const w    = rect.width  > 10 ? rect.width  : 900;
+            const h    = rect.height > 10 ? rect.height : 550;
+            const uri  = await Plotly.toImage(gd, {{ format: 'png', width: w, height: h, scale: 6 }});
+            const pfx  = 'data:image/png;base64,';
+            return uri.startsWith(pfx) ? uri.slice(pfx.length) : null;
+        }} catch (e) {{
+            console.warn('capturePlot failed for index', idx, e);
+            return null;
+        }}
+    }}
+
+    function getAspect(b64) {{
+        return new Promise(resolve => {{
+            const img    = new Image();
+            img.onload   = () => resolve(img.width / img.height);
+            img.onerror  = () => resolve(900 / 550);
+            img.src      = 'data:image/png;base64,' + b64;
+        }});
+    }}
+
+    try {{
+        const fbJv  = document.getElementById(jvFbId)?.value  || '';
+        const fbBox = document.getElementById(boxFbId)?.value || '';
+
+        setStatus('Capturing plot images from browser...');
+        const jvB64  = (await capturePlot(payload.jv_idx))  || fbJv;
+        const boxB64 = (await capturePlot(payload.box_idx)) || fbBox;
+
+        const IMG_H = 3.45;
+        const jvW   = +(  (jvB64  ? await getAspect(jvB64)  : 900 / 550) * IMG_H).toFixed(3);
+        const boxW  = +((boxB64   ? await getAspect(boxB64) : 900 / 550) * IMG_H).toFixed(3);
+
+        setStatus('Building PowerPoint slide...');
+
+        const NAVY   = '1F3964';
+        const TEAL   = '1B6B5E';
+        const TMID   = 'D5EAE6';
+        const TLIGHT = 'EBF4F2';
+        const GRAY   = '333333';
+        const WHITE  = 'FFFFFF';
+
+        const pres = new PptxGenJS();
+        pres.defineLayout({{ name: 'WIDE', width: 13.333, height: 7.5 }});
+        pres.layout = 'WIDE';
+        const slide = pres.addSlide();
+
+        slide.addText('Process name', {{
+            x: 0.28, y: 0.10, w: 12.77, h: 0.70,
+            fontSize: 28, bold: true, color: NAVY, fontFace: 'Calibri'
+        }});
+        slide.addText('Stack:  ...', {{
+            x: 0.28, y: 0.83, w: 12.77, h: 0.40,
+            fontSize: 14, color: GRAY, fontFace: 'Calibri'
+        }});
+
+        if (jvB64)  slide.addImage({{ data: 'data:image/png;base64,' + jvB64,
+                                      x: 0.28, y: 1.32, w: jvW,  h: IMG_H }});
+        if (boxB64) slide.addImage({{ data: 'data:image/png;base64,' + boxB64,
+                                      x: 6.80, y: 1.32, w: boxW, h: IMG_H }});
+
+        function hdrCell(txt) {{
+            return {{ text: txt, options: {{ fill: {{ color: TEAL }}, color: WHITE,
+                     bold: true, align: 'center', valign: 'middle' }} }};
+        }}
+        function dataCell(txt, fill) {{
+            return {{ text: txt, options: {{ fill: {{ color: fill }}, color: GRAY,
+                     align: 'center', valign: 'middle' }} }};
+        }}
+        const rows = [
+            [hdrCell(''), hdrCell('Baseline'), hdrCell('Current batch')],
+            [dataCell('V_OC', TMID),   dataCell('', TMID),   dataCell('', TMID)  ],
+            [dataCell('J_SC', TLIGHT), dataCell('', TLIGHT), dataCell('', TLIGHT)],
+            [dataCell('FF',   TMID),   dataCell('', TMID),   dataCell('', TMID)  ],
+            [dataCell('PCE',  TLIGHT), dataCell('', TLIGHT), dataCell('', TLIGHT)],
+        ];
+        slide.addTable(rows, {{
+            x: 0.28, y: 4.95, w: 6.0, h: 2.0,
+            colW: [1.2, 2.4, 2.4],
+            fontSize: 12, fontFace: 'Calibri',
+            border: {{ type: 'none' }}
+        }});
+        slide.addText('Speculations:', {{
+            x: 6.80, y: 4.95, w: 6.25, h: 2.0,
+            fontSize: 16, color: TEAL, fontFace: 'Calibri', valign: 'top'
+        }});
+        slide.addText('Batch ID:   ' + payload.batch_str, {{
+            x: 0.28, y: 7.20, w: 12.77, h: 0.28,
+            fontSize: 11, bold: true, color: GRAY, fontFace: 'Calibri'
+        }});
+
+        setStatus('Saving...');
+        const blob = await pres.write('blob');
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = payload.filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        setStatus('Downloaded: ' + payload.filename);
+
+    }} catch (err) {{
+        setStatus('Error: ' + (err.message || String(err)), true);
+        console.error('PPTX generation failed:', err);
+    }}
+}})();
+"""
+
+        with self.download_pptx_output:
+            clear_output(wait=True)
+            # HTML first so the status div + fallback textareas are in the DOM
+            display(HTML(
+                f'<div id="jv-pptx-status" style="padding:6px 0; font-size:13px; color:#1f2937;">'
+                f'Capturing plots and generating PowerPoint...</div>'
+                f'<textarea id="{jv_fb_id}"  style="display:none;">{jv_fb}</textarea>'
+                f'<textarea id="{box_fb_id}" style="display:none;">{box_fb}</textarea>'
+            ))
+            # Inject library + generation code as a single script so PptxGenJS
+            # is synchronously available when the async IIFE starts.
+            display(Javascript(pptxgen_js + '\n' + js_code))
 
     def _build_download_table_assets(self):
         """Build summary table assets to include in the combined download ZIP."""
