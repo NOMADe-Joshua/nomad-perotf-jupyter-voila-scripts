@@ -43,14 +43,14 @@ class ResizablePlotWidget:
         # CRITICAL FIX: Update figure layout AND make legend draggable
         self.fig.update_layout(
             autosize=True,
-            margin=dict(l=80, r=50, t=80, b=80, autoexpand=False),
+            margin=dict(l=80, r=50, t=80, b=120, autoexpand=True),
             xaxis=dict(
                 autorange=False if self.fig.layout.xaxis.range else True,
                 constrain='domain',
-                automargin=False
+                automargin=True
             ),
             yaxis=dict(
-                automargin=False
+                automargin=True
             ),
             legend=dict(
                 # ENABLE DRAGGABLE LEGEND - User can move it with mouse
@@ -97,7 +97,7 @@ class ResizablePlotWidget:
                 resize: both; 
                 overflow: hidden;
                 min-width: 400px;
-                min-height: 300px;
+                min-height: 380px;
                 max-width: 1400px;
                 max-height: 1000px;
                 background-color: white;
@@ -167,15 +167,17 @@ class ResizablePlotWidget:
                 if (!figureData.layout.margin) {{
                     figureData.layout.margin = {{}};
                 }}
-                figureData.layout.margin.autoexpand = false;
-                
-                // Disable automargin for all axes
-                if (figureData.layout.xaxis) {{
-                    figureData.layout.xaxis.automargin = false;
-                }}
-                if (figureData.layout.yaxis) {{
-                    figureData.layout.yaxis.automargin = false;
-                }}
+                figureData.layout.margin.autoexpand = true;
+
+                // Enable automargin for all axes present in layout
+                Object.keys(figureData.layout).forEach(function(key) {{
+                    if (key.startsWith('xaxis') || key.startsWith('yaxis')) {{
+                        if (!figureData.layout[key]) {{
+                            figureData.layout[key] = {{}};
+                        }}
+                        figureData.layout[key].automargin = true;
+                    }}
+                }});
             }}
             
             // Store original x-axis range
@@ -188,6 +190,32 @@ class ResizablePlotWidget:
             function initPlot() {{
                 const plotDiv = document.getElementById('{self.plot_id}');
                 const container = document.getElementById('container-{self.plot_id}');
+
+                function getDynamicBottomMargin(gd) {{
+                    try {{
+                        const tickNodes = gd.querySelectorAll('.xtick text');
+                        if (!tickNodes || tickNodes.length === 0) {{
+                            return 120;
+                        }}
+
+                        let maxProjectedHeight = 0;
+                        const angleRad = Math.PI / 4; // 45 degrees as common case
+
+                        tickNodes.forEach(function(node) {{
+                            // ignore empty labels
+                            if (!node.textContent || !node.textContent.trim()) return;
+                            const bb = node.getBBox();
+                            // Conservative projection for angled labels
+                            const projected = Math.abs(Math.sin(angleRad) * bb.width) + Math.abs(Math.cos(angleRad) * bb.height);
+                            if (projected > maxProjectedHeight) maxProjectedHeight = projected;
+                        }});
+
+                        // add padding + axis/title breathing room
+                        return Math.max(120, Math.ceil(maxProjectedHeight + 40));
+                    }} catch (e) {{
+                        return 120;
+                    }}
+                }}
 
                 function triggerBlobDownload(blob, filename) {{
                     const objectUrl = URL.createObjectURL(blob);
@@ -309,7 +337,7 @@ class ResizablePlotWidget:
                             Plotly.relayout(plotDiv, {{
                                 'xaxis.range': originalXRange,
                                 'xaxis.autorange': false,
-                                'xaxis.automargin': false
+                                'xaxis.automargin': true
                             }});
                         }}
                     }});
@@ -327,17 +355,20 @@ class ResizablePlotWidget:
                                 if (!rect || !isFinite(rect.width) || !isFinite(rect.height) || rect.width <= 0 || rect.height <= 0) {{
                                     return;
                                 }}
+
+                                const dynamicBottom = getDynamicBottomMargin(plotDiv);
                                 
                                 const updateLayout = {{
                                     width: rect.width,
                                     height: rect.height,
-                                    'margin.autoexpand': false
+                                    'margin.autoexpand': true,
+                                    'margin.b': dynamicBottom
                                 }};
                                 
                                 if (originalXRange) {{
                                     updateLayout['xaxis.range'] = originalXRange;
                                     updateLayout['xaxis.autorange'] = false;
-                                    updateLayout['xaxis.automargin'] = false;
+                                    updateLayout['xaxis.automargin'] = true;
                                 }}
                                 
                                 console.log('Resizing to:', updateLayout);
@@ -431,7 +462,6 @@ class ResizablePlotManager:
                 ResizablePlotManager._display_plots_internal(figs, names, titles, subtitles)
         else:
             ResizablePlotManager._display_plots_internal(figs, names, titles, subtitles)
-    
     @staticmethod
     def _display_plots_internal(figs, names, titles=None, subtitles=None):  # ADD parameters
         """Internal method to display plots"""
@@ -447,11 +477,9 @@ class ResizablePlotManager:
                 # Use provided title or fall back to name
                 display_title = titles[i] if titles and i < len(titles) else name
                 subtitle = subtitles[i] if subtitles and i < len(subtitles) else None
-                
+
                 # Determine appropriate size based on plot type
-                if "histogram" in name.lower():
-                    width, height = 700, 500
-                elif "jv_curve" in name.lower() or "jv curve" in name.lower():
+                if "jv_curve" in name.lower() or "jv curve" in name.lower():
                     width, height = 800, 600
                 elif "boxplot" in name.lower():
                     width, height = 900, 600

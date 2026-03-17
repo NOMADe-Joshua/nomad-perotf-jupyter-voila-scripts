@@ -1605,9 +1605,9 @@ class PlotManager:
             #title=dict(text=''),
             template="plotly_white",
             showlegend=False,
-            width=1600,   # 👈 CHANGED: 16:10 aspect ratio width
-            height=1000,  # 👈 CHANGED: 16:10 aspect ratio height
-            margin=dict(l=80, r=200, t=130, b=80),
+            width=1400,
+            height=900,      # 👈 Reduced height to compress plots vertically
+            margin=dict(l=80, r=200, t=130, b=130),  # 👈 Larger bottom margin for rotated labels
             plot_bgcolor='white',
             paper_bgcolor='white',
             hovermode='closest'
@@ -1835,9 +1835,9 @@ class PlotManager:
             title=dict(text=title_text, x=0.5, xanchor='center', font=dict(size=self.font_size_title, color='black')),
             template="plotly_white",
             showlegend=False,
-            width=1600,   # 👈 CHANGED: 16:10 aspect ratio width  
-            height=1000,  # 👈 CHANGED: 16:10 aspect ratio height
-            margin=dict(l=80, r=200, t=130, b=80),
+            width=1400,
+            height=700,      # 👈 Reduced height to compress plot vertically
+            margin=dict(l=80, r=200, t=130, b=130),  # 👈 Larger bottom margin for rotated labels
             plot_bgcolor='white',
             paper_bgcolor='white',
             hovermode='closest',
@@ -1845,6 +1845,10 @@ class PlotManager:
             yaxis=dict(titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis))
         )
 
+        # Apply rotation for x-axis
+        if len(group_keys) > 4:
+            fig.update_xaxes(tickangle=-45)
+        
         fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
 
         fig_name = f"Boxplot_{name_y}_by_{name_x}"
