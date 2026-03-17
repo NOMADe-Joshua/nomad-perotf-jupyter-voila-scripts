@@ -38,12 +38,13 @@
       "researcher": "Joshua Damm",
       "process_sequence": [
         {"process": "Experiment Info"},
-        {"process": "Cleaning UV-Ozone", "config": {"solvents": 2}},
+        {"process": "Cleaning O2-Plasma", "config": {"solvents": 2}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1, "antisolvent": false}},
         {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
         {"process": "Seq-Evaporation", "config": {"materials": 2}},
         {"process": "Close Space Sublimation"},
         {"process": "Annealing"},
+        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 0, "spinsteps": 1, "antisolvent": false}},
         {"process": "Seq-Evaporation", "config": {"materials": 2}},
         {"process": "Evaporation"}
       ]
