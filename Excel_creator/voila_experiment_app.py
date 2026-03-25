@@ -353,7 +353,8 @@ class MinimalistExperimentBuilder:
         # Check if process has configuration options - updated list
         configurable_processes = [
             'Spin Coating', 'Cleaning O2-Plasma', 'Cleaning UV-Ozone', 
-            'Inkjet Printing', 'Co-Evaporation', 'Seq-Evaporation', 'Slot Die Coating', 'Dip Coating'
+            'Inkjet Printing', 'Co-Evaporation', 'Seq-Evaporation', 'Close Space Sublimation',
+            'Slot Die Coating', 'Dip Coating'
         ]
         
         if process_name not in configurable_processes:
@@ -404,11 +405,11 @@ class MinimalistExperimentBuilder:
             )
             numeric_controls.append(spinsteps_widget)
         
-        # Materials (for Co-Evaporation and Seq-Evaporation)
-        if process_name in ['Co-Evaporation', 'Seq-Evaporation']:
+        # Materials (for co/seq evaporation and CSS)
+        if process_name in ['Co-Evaporation', 'Seq-Evaporation', 'Close Space Sublimation']:
             materials_widget = widgets.BoundedIntText(
-                value=config.get('materials', 2),
-                min=1, max=10,
+                value=config.get('materials', 2 if process_name in ['Co-Evaporation', 'Seq-Evaporation'] else 1),
+                min=1, max=5,
                 description='Materials:',
                 style={'description_width': '65px'},
                 layout=widgets.Layout(width='130px')
@@ -418,6 +419,20 @@ class MinimalistExperimentBuilder:
                 names='value'
             )
             numeric_controls.append(materials_widget)
+
+        # Optional milling preparation for CSS
+        if process_name == 'Close Space Sublimation':
+            milling_checkbox = widgets.Checkbox(
+                value=config.get('milling', False),
+                description='Milling',
+                style={'description_width': 'initial'},
+                layout=widgets.Layout(width='120px')
+            )
+            milling_checkbox.observe(
+                lambda change, idx=index: self._update_config(idx, 'milling', change['new']),
+                names='value'
+            )
+            checkbox_controls.append(milling_checkbox)
         
         # Wf Number of Pulses (for Inkjet Printing)
         if process_name == 'Inkjet Printing':
@@ -531,7 +546,7 @@ class MinimalistExperimentBuilder:
             configurable_processes = [
                 'Spin Coating', 'Cleaning O2-Plasma', 'Cleaning UV-Ozone', 
                 'Inkjet Printing', 'Slot Die Coating', 'Dip Coating',
-                'Co-Evaporation', 'Seq-Evaporation'
+                'Co-Evaporation', 'Seq-Evaporation', 'Close Space Sublimation'
             ]
             
             if new_process_type in configurable_processes:
@@ -551,7 +566,8 @@ class MinimalistExperimentBuilder:
             'Slot Die Coating': {'solvents': 1, 'solutes': 1},
             'Dip Coating': {'solvents': 1, 'solutes': 1},
             'Co-Evaporation': {'materials': 2},
-            'Seq-Evaporation': {'materials': 2}
+            'Seq-Evaporation': {'materials': 2},
+            'Close Space Sublimation': {'materials': 1, 'milling': False}
         }
         return defaults.get(process_name, {})
     
@@ -649,9 +665,11 @@ class MinimalistExperimentBuilder:
             "Co-Evaporation": {"materials": 2},
             # Added DB 2024-11-29  multiple materials #Could also be called Seq-Sublimation instead of Seq-Evaporation
             "Seq-Evaporation": {"materials": 2},
-            "Close Space Sublimation": {"steps": ["Material name", "Layer type", "Tool/GB name", "Organic", "Process pressure [bar]",
+            "Close Space Sublimation": {"materials": 1, "milling": False, "steps": ["Material name", "Layer type", "Tool/GB name", "Organic",
+                                    "Material name 1", "Process pressure [mbar]",
                                     "Source temperature [°C]", "Substrate temperature [°C]", "Material state", "Substrate source distance [mm]",
-                                    "Thickness [nm]", "Deposition Time [s]", "Carrier gas", "Notes"]},
+                                    "Thickness [nm]", "Deposition Time [s]", "Carrier gas",
+                                    "Milling rotation speed [rpm]", "Milling rotation time [min]", "Milling rest time [min]", "Notes"]},
 
             "Lamination": {"steps": ["Interface", "Tool/GB name", "Temperature during process[°C]",  "Temperature at pressure relief [°C]", "Pressure [MPa]", "Force [N]",  
                                     "Time lamination [s]", "Heat up time [s]", "Cool down time [s]", "Total time [s]", "Athmosphere in chamber", "Humidity [%%rel]",

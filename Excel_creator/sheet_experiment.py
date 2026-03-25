@@ -302,12 +302,19 @@ def add_experiment_sheet(workbook, process_sequence, is_testing=False):
             return steps
 
         if process_name == 'Close Space Sublimation':
+            # CSS now supports multiple source materials and optional milling preparation.
             steps = [
                 make_label('Material name', ''),
                 make_label('Layer type', ''),
                 make_label('Tool/GB name', 'Solvent GB'),
                 make_label('Organic', ''),
-                make_label('Process pressure [bar]', 4),
+            ]
+
+            for i in range(1, config.get('materials', 1) + 1):
+                steps.append(make_label(f'Material name {i}', ''))
+
+            steps.extend([
+                make_label('Process pressure [mbar]', 40),
                 make_label('Source temperature [°C]', ''),
                 make_label('Substrate temperature [°C]', ''),
                 make_label('Material state', ''),
@@ -315,8 +322,16 @@ def add_experiment_sheet(workbook, process_sequence, is_testing=False):
                 make_label('Thickness [nm]', ''),
                 make_label('Deposition Time [s]', ''),
                 make_label('Carrier gas', 'no'),
-                make_label('Notes', ''),
-            ]
+            ])
+
+            if config.get('milling', False):
+                steps.extend([
+                    make_label('Milling rotation speed [rpm]', ''),
+                    make_label('Milling rotation time [min]', ''),
+                    make_label('Milling rest time [min]', ''),
+                ])
+
+            steps.append(make_label('Notes', ''))
             return steps
 
         if process_name == 'Lamination':

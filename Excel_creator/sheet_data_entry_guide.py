@@ -266,7 +266,11 @@ def add_guide_sheet(workbook):
         ['Layer type', 'Type of layer', 'Text', '', 'Absorber'],
         ['Tool/GB name', 'Tool used', 'Text', '', 'CSS Chamber'],
         ['Organic', 'Is the material organic?', 'Boolean', '', 'False'],
-        ['Process pressure', 'Process pressure', 'Number', 'bar', '1e-2'],
+        ['Material name 1', 'First source material (optional)', 'Text', '', 'CdCl2'],
+        ['Material name 2', 'Second source material (optional)', 'Text', '', 'MgCl2'],
+        ['Material name 3', 'Third source material (optional)', 'Text', '', ''],
+        ['Material name 4', 'Fourth source material (optional)', 'Text', '', ''],
+        ['Process pressure', 'Process pressure', 'Number', 'mbar', '40'],
         ['Source temperature', 'Source temperature', 'Number', '°C', '650'],
         ['Substrate temperature', 'Substrate temperature', 'Number', '°C', '550'],
         ['Material state', 'Material physical state', 'Text', '', 'Powder'],
@@ -274,6 +278,9 @@ def add_guide_sheet(workbook):
         ['Thickness', 'Layer thickness', 'Number', 'nm', '2000'],
         ['Deposition Time', 'Deposition duration', 'Number', 's', '300'],
         ['Carrier gas', 'Carrier gas type', 'Text', '', 'Ar'],
+        ['Milling rotation speed', 'Planetary mill rotation speed (optional)', 'Number', 'rpm', '350'],
+        ['Milling rotation time', 'Planetary mill rotation time (optional)', 'Number', 'min', '20'],
+        ['Milling rest time', 'Planetary mill rest time (optional)', 'Number', 'min', '5'],
         ['Notes', 'Additional notes', 'Text', '', ''],
     ]
     row = write_table(guide_ws, row, 'Close Space Sublimation', css)
