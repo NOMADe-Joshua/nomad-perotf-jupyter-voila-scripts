@@ -567,7 +567,7 @@ class MinimalistExperimentBuilder:
             'Dip Coating': {'solvents': 1, 'solutes': 1},
             'Co-Evaporation': {'materials': 2},
             'Seq-Evaporation': {'materials': 2},
-            'Close Space Sublimation': {'materials': 1, 'milling': False}
+            'Close Space Sublimation': {'materials': 1, 'milling': False, 'mixing_ratio': False}
         }
         return defaults.get(process_name, {})
     
@@ -578,6 +578,12 @@ class MinimalistExperimentBuilder:
                 self.current_sequence[process_index]['config'] = {}
             
             self.current_sequence[process_index]['config'][key] = value
+
+            # CSS: automatically enable mix ratio only when multiple materials are selected.
+            process_name = self.current_sequence[process_index].get('process')
+            if process_name == 'Close Space Sublimation' and key == 'materials':
+                materials_count = self.current_sequence[process_index]['config'].get('materials', 1)
+                self.current_sequence[process_index]['config']['mixing_ratio'] = materials_count > 1
     
     def _add_process_below(self, index):
         """Add a new process below the current one"""
@@ -665,10 +671,11 @@ class MinimalistExperimentBuilder:
             "Co-Evaporation": {"materials": 2},
             # Added DB 2024-11-29  multiple materials #Could also be called Seq-Sublimation instead of Seq-Evaporation
             "Seq-Evaporation": {"materials": 2},
-            "Close Space Sublimation": {"materials": 1, "milling": False, "steps": ["Material name", "Layer type", "Tool/GB name", "Organic",
+            "Close Space Sublimation": {"materials": 1, "milling": False, "mixing_ratio": False, "steps": ["Material name", "Layer type", "Tool/GB name", "Organic",
                                     "Material name 1", "Process pressure [mbar]",
                                     "Source temperature [°C]", "Substrate temperature [°C]", "Material state", "Substrate source distance [mm]",
                                     "Thickness [nm]", "Deposition Time [s]", "Carrier gas",
+                                    "Material ratio 1", "Material wt% 1",
                                     "Milling rotation speed [rpm]", "Milling rotation time [min]", "Milling rest time [min]", "Notes"]},
 
             "Lamination": {"steps": ["Interface", "Tool/GB name", "Temperature during process[°C]",  "Temperature at pressure relief [°C]", "Pressure [MPa]", "Force [N]",  
