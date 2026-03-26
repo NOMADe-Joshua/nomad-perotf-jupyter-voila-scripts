@@ -6,15 +6,23 @@ import base64
 from datetime import datetime
 from pathlib import Path
 
+# DEBUG FLAG - Set to False to suppress all debug output
+DEBUG = False
+
+def _debug_print(msg):
+    """Helper function to conditionally print debug messages"""
+    if DEBUG:
+        print(msg)
+
 try:
     from experiment_excel_builder import ExperimentExcelBuilder
     EXCEL_BUILDER_AVAILABLE = True
 except ImportError:
     EXCEL_BUILDER_AVAILABLE = False
-    print("ExperimentExcelBuilder not found. Install it or check the import path.")
+    _debug_print("ExperimentExcelBuilder not found. Install it or check the import path.")
 
 class MinimalistExperimentBuilder:
-    def __init__(self, templates_file="templates/process_templates.json"):
+    def __init__(self, templates_file="process_templates.json"):
         self.templates_file = Path(templates_file)
         self.current_sequence = []
         self.templates = {}
@@ -39,29 +47,56 @@ class MinimalistExperimentBuilder:
     def load_templates(self):
         """Load templates from JSON file"""
         try:
-            print(f"🔍 Looking for templates file: {self.templates_file}")
-            print(f"🔍 Current working directory: {Path.cwd()}")
-            print(f"🔍 File exists: {self.templates_file.exists()}")
+            # Get the directory where this script is located
+            try:
+                script_dir = Path(__file__).parent
+            except NameError:
+                # __file__ not available in Jupyter, use current directory
+                script_dir = Path.cwd()
             
-            if self.templates_file.exists():
-                with open(self.templates_file, 'r') as f:
+            # Try multiple possible paths - prioritize script directory
+            possible_paths = [
+                script_dir / 'process_templates.json',  # Same directory as script
+                script_dir / 'templates' / 'process_templates.json',  # Subfolder
+                Path.cwd() / 'process_templates.json',  # Current working directory
+                Path.cwd() / 'Excel_creator' / 'process_templates.json',
+                Path.cwd() / 'Excel_creator' / 'templates' / 'process_templates.json',
+                self.templates_file,  # Original path
+            ]
+            
+            template_file = None
+            for path in possible_paths:
+                if path.exists():
+                    template_file = path
+                    break
+            
+            if template_file:
+                with open(template_file, 'r') as f:
                     data = json.load(f)
                     self.templates = data.get('templates', {})
-                    
-                print(f"✅ Loaded {len(self.templates)} templates")
+                
+                _debug_print(f"✅ Loaded {len(self.templates)} templates from {template_file}")
+                for key in self.templates.keys():
+                    _debug_print(f"   - {self.templates[key].get('name', key)}")
             else:
-                print(f"⚠️ Template file not found at {self.templates_file}")
-                print(f"Creating default template file...")
+                _debug_print(f"⚠️ Template file not found in expected locations:")
+                for path in possible_paths:
+                    _debug_print(f"   Tried: {path}")
+                _debug_print(f"Creating default template file...")
                 self.create_default_template()
+                return
                 
             self._update_template_dropdown()
             
         except Exception as e:
-            print(f"❌ Error loading templates: {e}")
+            _debug_print(f"❌ Error loading templates: {e}")
+            if DEBUG:
+                import traceback
+                traceback.print_exc()
             self.create_default_template()
     
     def create_default_template(self):
-        """Create a default template file"""
+        """Create a minimal default template file as fallback"""
         default_data = {
             "metadata": {
                 "version": "1.0",
@@ -76,52 +111,25 @@ class MinimalistExperimentBuilder:
                     "process_sequence": [
                         {"process": "Experiment Info"}
                     ]
-                },
-                "simple_coating": {
-                    "name": "Simple Coating",
-                    "description": "Basic coating process",
-                    "category": "Coating Processes",
-                    "process_sequence": [
-                        {"process": "Experiment Info"},
-                        {"process": "Cleaning O2-Plasma", "config": {"solvents": 1}},
-                        {"process": "Spin Coating", "config": {"solvents": 1, "solutes": 1, "spinsteps": 1}},
-                        {"process": "Evaporation"}
-                    ]
-                },
-                "multijunction_cell": {
-                    "name": "Multijunction Cell",
-                    "description": "Complete multijunction solar cell process",
-                    "category": "Solar Cell Processes",
-                    "process_sequence": [
-                        {"process": "Experiment Info"},
-                        {"process": "Multijunction Info"},
-                        {"process": "Cleaning O2-Plasma", "config": {"solvents": 2}},
-                        {"process": "Spin Coating", "config": {"solvents": 2, "solutes": 2, "spinsteps": 2, "antisolvent": True}},
-                        {"process": "Co-Evaporation", "config": {"materials": 2}},
-                        {"process": "Annealing"}
-                    ]
-                },
-                "sublimation_process": {
-                    "name": "Close Space Sublimation",
-                    "description": "CSS deposition process",
-                    "category": "Deposition Processes",
-                    "process_sequence": [
-                        {"process": "Experiment Info"},
-                        {"process": "Cleaning UV-Ozone", "config": {"solvents": 1}},
-                        {"process": "Close Space Sublimation"},
-                        {"process": "Annealing"}
-                    ]
                 }
             }
         }
         
-        self.templates_file.parent.mkdir(parents=True, exist_ok=True)
+        # Try to create in script directory first
+        try:
+            script_dir = Path(__file__).parent
+        except NameError:
+            script_dir = Path.cwd()
         
-        with open(self.templates_file, 'w') as f:
+        target_file = script_dir / 'process_templates.json'
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(target_file, 'w') as f:
             json.dump(default_data, f, indent=2)
         
         self.templates = default_data["templates"]
-        print(f"✅ Created default template file with {len(self.templates)} templates")
+        _debug_print(f"✅ Created minimal template file at {target_file}")
+        _debug_print(f"   Please load proper templates from {target_file}")
         self._update_template_dropdown()
     
     def setup_widgets(self):
@@ -213,7 +221,7 @@ class MinimalistExperimentBuilder:
         if template_name == "Select template...":
             with self.status_output:
                 self.status_output.clear_output()
-                print("❌ Please select a template")
+                _debug_print("❌ Please select a template")
             return
         
         # Find template
@@ -237,22 +245,18 @@ class MinimalistExperimentBuilder:
                 self.status_output.clear_output()
                 seq_evap_processes = [p for p in self.current_sequence if p["process"] == "Seq-Evaporation"]
                 if seq_evap_processes:
-                    print(f"🔍 Found {len(seq_evap_processes)} Seq-Evaporation processes")
-                    print(f"🔍 Available processes: {self.available_processes}")
+                    _debug_print(f"🔍 Found {len(seq_evap_processes)} Seq-Evaporation processes")
+                    _debug_print(f"🔍 Available processes: {self.available_processes}")
                     if "Seq-Evaporation" in self.available_processes:
-                        print("✅ Seq-Evaporation is in available processes")
+                        _debug_print("✅ Seq-Evaporation is in available processes")
                     else:
-                        print("❌ Seq-Evaporation NOT in available processes")
+                        _debug_print("❌ Seq-Evaporation NOT in available processes")
             
             self._update_process_display()
             
             with self.status_output:
                 self.status_output.clear_output()
-                # print(f"✅ Applied: {template_name} ({len(self.current_sequence)} processes)")
-    
-    def _update_process_display(self):
-        """Update the process sequence display"""
-        if not self.current_sequence:
+            # _debug_print(f"✅ Applied: {template_name} ({len(self.current_sequence)} processes)")
             self.process_sequence_area.children = []
             return
         
@@ -598,7 +602,7 @@ class MinimalistExperimentBuilder:
         
         with self.status_output:
             self.status_output.clear_output()
-            print(f"➕ Added process at position {index + 2}")
+            _debug_print(f"➕ Added process at position {index + 2}")
     
     def _remove_process(self, index):
         """Remove a process (can't remove Experiment Info)"""
@@ -608,36 +612,36 @@ class MinimalistExperimentBuilder:
             
             with self.status_output:
                 self.status_output.clear_output()
-                print(f"🗑️ Removed: {removed_process['process']}")
+                _debug_print(f"🗑️ Removed: {removed_process['process']}")
     
     def _on_generate_excel(self, button):
         """Generate Excel file"""
         if not self.current_sequence:
             with self.status_output:
                 self.status_output.clear_output()
-                print("❌ No processes configured")
+                _debug_print("❌ No processes configured")
             return
         
         try:
             with self.status_output:
                 self.status_output.clear_output()
-                print("🔄 Generating Excel...")
-                print("🔍 Using openpyxl directly...")
+                _debug_print("🔄 Generating Excel...")
+                _debug_print("🔍 Using openpyxl directly...")
             
             excel_data = self._generate_excel_data()
             
             with self.status_output:
-                print(f"📏 Final Excel data size: {len(excel_data)} bytes")
+                _debug_print(f"📏 Final Excel data size: {len(excel_data)} bytes")
                 
                 # Check if it's really Excel data
                 if len(excel_data) > 0:
                     if excel_data.startswith(b'PK'):
-                        print("✅ Excel file signature is correct")
+                        _debug_print("✅ Excel file signature is correct")
                     else:
-                        print("❌ Not a valid Excel file!")
-                        print(f"First 50 chars: {excel_data[:50]}")
+                        _debug_print("❌ Not a valid Excel file!")
+                        _debug_print(f"First 50 chars: {excel_data[:50]}")
                 else:
-                    print("❌ Excel data is empty!")
+                    _debug_print("❌ Excel data is empty!")
             
             filename = f"experiment_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
             download_html = self._create_download_link(excel_data, filename)
@@ -645,14 +649,15 @@ class MinimalistExperimentBuilder:
             self.download_area.value = download_html
             
             with self.status_output:
-                print(f"🎯 Download link created for: {filename}")
+                _debug_print(f"🎯 Download link created for: {filename}")
                 
         except Exception as e:
             with self.status_output:
                 self.status_output.clear_output()
-                print(f"❌ Error in _on_generate_excel: {e}")
-                import traceback
-                traceback.print_exc()
+                _debug_print(f"❌ Error in _on_generate_excel: {e}")
+                if DEBUG:
+                    import traceback
+                    traceback.print_exc()
             
     def process_config_function(self):
         # Define the base process configuration
@@ -710,7 +715,7 @@ class MinimalistExperimentBuilder:
         if EXCEL_BUILDER_AVAILABLE:
             try:
                 with self.status_output:
-                    print("🔄 Using ExperimentExcelBuilder (full detailed format)...")
+                    _debug_print("🔄 Using ExperimentExcelBuilder (full detailed format)...")
                 
                 # Import the process config from Create_Excel_Script_1.py
                 process_config = self.process_config_function()
@@ -724,23 +729,23 @@ class MinimalistExperimentBuilder:
                 excel_data = buffer.getvalue()
                 
                 with self.status_output:
-                    print(f"✅ ExperimentExcelBuilder created file: {len(excel_data)} bytes")
-                    print(f"🔍 Multiple sheets: {len(builder.workbook.worksheets)} worksheets")
-                    print(f"🔍 Sheet names: {[ws.title for ws in builder.workbook.worksheets]}")
+                    _debug_print(f"✅ ExperimentExcelBuilder created file: {len(excel_data)} bytes")
+                    _debug_print(f"🔍 Multiple sheets: {len(builder.workbook.worksheets)} worksheets")
+                    _debug_print(f"🔍 Sheet names: {[ws.title for ws in builder.workbook.worksheets]}")
                 
                 if excel_data and len(excel_data) > 1000:  # Should be much larger with detailed format
                     return excel_data
                 else:
                     with self.status_output:
-                        print("❌ ExperimentExcelBuilder file seems too small, trying fallback...")
+                        _debug_print("❌ ExperimentExcelBuilder file seems too small, trying fallback...")
                 
             except Exception as e:
                 with self.status_output:
-                    print(f"❌ ExperimentExcelBuilder failed: {e}")
-                    print("🔄 Falling back to basic openpyxl...")
+                    _debug_print(f"❌ ExperimentExcelBuilder failed: {e}")
+                    _debug_print("🔄 Falling back to basic openpyxl...")
         else:
             with self.status_output:
-                print("❌ ExperimentExcelBuilder not available, using basic openpyxl...")
+                _debug_print("❌ ExperimentExcelBuilder not available, using basic openpyxl...")
         
         # Fallback: Basic openpyxl (simple format)
         try:
@@ -748,7 +753,7 @@ class MinimalistExperimentBuilder:
             from openpyxl.styles import Font
             
             with self.status_output:
-                print("🔄 Using basic openpyxl (simple format)...")
+                _debug_print("🔄 Using basic openpyxl (simple format)...")
             
             # Create workbook
             wb = Workbook()
@@ -777,7 +782,7 @@ class MinimalistExperimentBuilder:
                 row += 1
             
             with self.status_output:
-                print(f"✅ Basic Excel created: {len(self.current_sequence)} processes")
+                _debug_print(f"✅ Basic Excel created: {len(self.current_sequence)} processes")
             
             # Save to buffer
             buffer = io.BytesIO()
@@ -786,15 +791,16 @@ class MinimalistExperimentBuilder:
             excel_data = buffer.getvalue()
             
             with self.status_output:
-                print(f"💾 Basic Excel file: {len(excel_data)} bytes")
+                _debug_print(f"💾 Basic Excel file: {len(excel_data)} bytes")
             
             return excel_data
         
         except Exception as e:
             with self.status_output:
-                print(f"❌ All Excel generation methods failed: {e}")
-                import traceback
-                traceback.print_exc()
+                _debug_print(f"❌ All Excel generation methods failed: {e}")
+                if DEBUG:
+                    import traceback
+                    traceback.print_exc()
             
             # Return error as text file
             error_content = f"""Excel Generation Error
