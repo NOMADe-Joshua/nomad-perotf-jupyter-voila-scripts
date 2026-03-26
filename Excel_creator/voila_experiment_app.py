@@ -39,6 +39,10 @@ class MinimalistExperimentBuilder:
     def load_templates(self):
         """Load templates from JSON file"""
         try:
+            print(f"🔍 Looking for templates file: {self.templates_file}")
+            print(f"🔍 Current working directory: {Path.cwd()}")
+            print(f"🔍 File exists: {self.templates_file.exists()}")
+            
             if self.templates_file.exists():
                 with open(self.templates_file, 'r') as f:
                     data = json.load(f)
@@ -46,6 +50,7 @@ class MinimalistExperimentBuilder:
                     
                 print(f"✅ Loaded {len(self.templates)} templates")
             else:
+                print(f"⚠️ Template file not found at {self.templates_file}")
                 print(f"Creating default template file...")
                 self.create_default_template()
                 
