@@ -256,17 +256,7 @@ class MinimalistExperimentBuilder:
             
             with self.status_output:
                 self.status_output.clear_output()
-            # _debug_print(f"✅ Applied: {template_name} ({len(self.current_sequence)} processes)")
-            self.process_sequence_area.children = []
-            return
-        
-        process_rows = []
-        
-        for i, process_data in enumerate(self.current_sequence):
-            row = self._create_process_row(i, process_data)
-            process_rows.append(row)
-        
-        self.process_sequence_area.children = process_rows
+                # _debug_print(f"✅ Applied: {template_name} ({len(self.current_sequence)} processes)")
 
     def _toggle_guide(self, button):
         """Toggle guide visibility"""
@@ -280,6 +270,20 @@ class MinimalistExperimentBuilder:
             self.guide_content.layout.display = 'none'
             self.guide_toggle.description = 'Show Guide'
             self.guide_toggle.icon = 'question'
+    
+    def _update_process_display(self):
+        """Update the process sequence display"""
+        if not self.current_sequence:
+            self.process_sequence_area.children = []
+            return
+        
+        process_rows = []
+        
+        for i, process_data in enumerate(self.current_sequence):
+            row = self._create_process_row(i, process_data)
+            process_rows.append(row)
+        
+        self.process_sequence_area.children = process_rows
     
     def _create_process_row(self, index, process_data):
         """Create a single row for a process"""
