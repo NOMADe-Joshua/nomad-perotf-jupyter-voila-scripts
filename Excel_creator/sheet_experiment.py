@@ -311,11 +311,11 @@ def add_experiment_sheet(workbook, process_sequence, is_testing=False):
             ]
 
             for i in range(1, config.get('materials', 1) + 1):
-                steps.append(make_label(f'Material name {i}', ''))
+                steps.append(make_label(f'Source material name {i}', ''))
 
             if config.get('materials', 1) > 1:
                 for i in range(1, config.get('materials', 1) + 1):
-                    steps.append(make_label(f'Material ratio {i}', ''))
+                    steps.append(make_label(f'Source material ratio {i}', ''))
 
             steps.extend([
                 make_label('Process pressure [mbar]', 40),
