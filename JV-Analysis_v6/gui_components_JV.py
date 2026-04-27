@@ -253,7 +253,7 @@ class FilterUI:
     def __init__(self):
         self.filter_presets = {
             "Default": [("PCE(%)", "<", "40"), ("FF(%)", "<", "89"), ("FF(%)", ">", "24"), 
-                       ("Voc(V)", "<", "2"), ("Voc(V)", ">", "0.5"), ("Jsc(mA/cm2)", "<", "0"), ("Jsc(mA/cm2)", ">", "-30")],
+                       ("Voc(V)", "<", "2.5"), ("Voc(V)", ">", "0.5"), ("Jsc(mA/cm2)", "<", "0"), ("Jsc(mA/cm2)", ">", "-30")],
             "Preset 2": [("FF(%)", "<", "15"), ("PCE(%)", ">=", "10")]
         }
         self._create_widgets()
