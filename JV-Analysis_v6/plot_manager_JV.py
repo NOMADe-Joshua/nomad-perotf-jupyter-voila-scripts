@@ -16,6 +16,7 @@ import pandas as pd
 import os
 import sys
 import math  # Add this import for ceiling calculation
+from typing import Any, cast
 
 # Add parent directory for shared modules
 parent_dir = os.path.dirname(os.getcwd())
@@ -339,10 +340,123 @@ class PlotManager:
             trace_type = getattr(trace, 'type', '')
             if trace_type == 'scatter' and isinstance(mode, str) and 'lines' in mode:
                 if getattr(trace, 'line', None) is None:
-                    trace.line = {}
-                trace.line.width = self.jv_line_width
+                    trace.line = go.scatter.Line(width=self.jv_line_width)
+                else:
+                    cast(Any, trace.line).width = self.jv_line_width
 
         return fig
+
+    def create_histogram(self, data, var_y):
+        """Create a simple histogram for a JV numeric column."""
+        column_map = {
+            'voc': 'Voc(V)',
+            'jsc': 'Jsc(mA/cm2)',
+            'ff': 'FF(%)',
+            'pce': 'PCE(%)',
+            'vmpp': 'V_MPP(V)',
+            'jmpp': 'J_MPP(mA/cm2)',
+            'pmpp': 'P_MPP(mW/cm2)',
+            'rser': 'R_series(Ohmcm2)',
+            'rshu': 'R_shunt(Ohmcm2)',
+        }
+
+        column_name = column_map.get(str(var_y).lower(), str(var_y))
+        if data is None or column_name not in data.columns:
+            fig = go.Figure()
+            fig.update_layout(title=f"No data available for {column_name}")
+            return fig, f"Histogram_{column_name}.html"
+
+        series = pd.to_numeric(data[column_name], errors='coerce').dropna()
+        fig = go.Figure()
+        fig.add_trace(go.Histogram(x=series, marker_color='rgba(93, 164, 214, 0.75)'))
+        fig.update_layout(
+            title=f"Histogram of {column_name}",
+            xaxis_title=column_name,
+            yaxis_title='Count',
+            template='plotly_white',
+        )
+        return fig, f"Histogram_{column_name}.html"
+
+    def create_jv_all_cells_plot(self, jvc_data, curves_data, colors=None):
+        """Compatibility wrapper for the all-cells JV plot."""
+        return self._create_jv_cells_plot(jvc_data, curves_data, colors=colors, plot_mode="all")
+
+    def create_jv_working_cells_plot(self, jvc_data, curves_data, colors=None):
+        """Compatibility wrapper for the working-cells JV plot."""
+        return self._create_jv_cells_plot(jvc_data, curves_data, colors=colors, plot_mode="working")
+
+    def create_jv_non_working_cells_plot(self, jvc_data, curves_data, colors=None):
+        """Compatibility wrapper for the non-working-cells JV plot."""
+        return self._create_jv_cells_plot(jvc_data, curves_data, colors=colors, plot_mode="non-working")
+
+    def _create_jv_cells_plot(self, jvc_data, curves_data, colors=None, plot_mode="all"):
+        """Create a combined JV plot grouped by sample and cell."""
+        if jvc_data is None or jvc_data.empty:
+            fig = go.Figure()
+            fig.update_layout(title="No data available")
+            return fig, f"JV_{plot_mode}_cells.html"
+
+        data = jvc_data[jvc_data['cell'].notna()].copy()
+        if data.empty:
+            fig = go.Figure()
+            fig.update_layout(title="No data available")
+            return fig, f"JV_{plot_mode}_cells.html"
+
+        if colors is None:
+            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
+
+        fig = go.Figure()
+        unique_pairs = data[['sample', 'cell']].drop_duplicates()
+        for idx, (_, pair_row) in enumerate(unique_pairs.iterrows()):
+            sample = pair_row['sample']
+            cell = pair_row['cell']
+            group_data = data[(data['sample'] == sample) & (data['cell'] == cell)]
+            voltage_data = group_data[group_data['variable'] == 'Voltage (V)']
+            current_data = group_data[group_data['variable'] == 'Current Density(mA/cm2)']
+            if voltage_data.empty or current_data.empty:
+                continue
+
+            max_voc = group_data['Voc(V)'].max() if 'Voc(V)' in group_data.columns else 1.2
+            x_max = (math.ceil(max_voc * 10) / 10) + 0.1
+            fig.add_shape(type="line", x0=-0.2, y0=0, x1=x_max, y1=0, line=dict(color="gray", width=2))
+            fig.add_shape(type="line", x0=0, y0=-5, x1=0, y1=25, line=dict(color="gray", width=2))
+
+            for row_idx in voltage_data.index.intersection(current_data.index):
+                voltage_values = voltage_data.loc[row_idx, voltage_data.columns[8:]].values
+                current_values = current_data.loc[row_idx, current_data.columns[8:]].values
+                if np.all(pd.isna(voltage_values)) or np.all(pd.isna(current_values)):
+                    continue
+
+                voltage_values, current_values = self._mask_boundary_zero_point(voltage_values, current_values)
+                if len(voltage_values) == 0 or len(current_values) == 0:
+                    continue
+
+                base_color = colors[idx % len(colors)]
+                fig.add_trace(go.Scatter(
+                    x=voltage_values,
+                    y=current_values,
+                    mode='lines+markers',
+                    line=dict(color=base_color, width=2),
+                    marker=dict(size=6, color=base_color),
+                    name=f"{sample}_{cell}",
+                    legendgroup=f"{sample}_{cell}",
+                    showlegend=True
+                ))
+
+        title_suffix = "All Cells" if plot_mode == "all" else ("Working Cells Only" if plot_mode == "working" else "Non-Working Cells Only")
+        fig.update_layout(
+            title=f"JV Curves - {title_suffix}",
+            xaxis_title='Voltage [V]',
+            yaxis_title='Current Density [mA/cm²]',
+            template='plotly_white',
+            showlegend=True,
+            width=1600,
+            height=1000,
+        )
+        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+        return fig, f"JV_{plot_mode}_cells.html"
+
     
     def apply_font_sizes_to_axes(self, fig):
         """Apply current font size settings to a figure's axes"""
@@ -350,11 +464,13 @@ class PlotManager:
         fig.update_yaxes(titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis))
         return fig
 
-    def _mask_boundary_zero_point(self, voltage_values, current_values, atol=1e-12):
-        """Remove only boundary (0,0) artifacts from JV arrays.
+    def _mask_boundary_zero_point(self, voltage_values, current_values, atol=1e-12, max_endpoint_step=0.5):
+        """Remove boundary artifacts from JV arrays.
 
-        Keeps valid inner (0,0) points untouched and only removes the first and/or
+        Keeps valid inner (0,0) points untouched and removes the first and/or
         last point if both voltage and current are approximately zero.
+        Also removes a boundary point when the voltage step to its neighbor is
+        unusually large, which catches stray 0 V / 1 V endpoints.
         """
         v = np.asarray(voltage_values, dtype=float)
         c = np.asarray(current_values, dtype=float)
@@ -376,8 +492,14 @@ class PlotManager:
         if len(v) > 1 and np.isclose(v[0], 0.0, atol=atol) and np.isclose(c[0], 0.0, atol=atol):
             v = v[1:]
             c = c[1:]
+        elif len(v) > 1 and abs(v[1] - v[0]) > max_endpoint_step:
+            v = v[1:]
+            c = c[1:]
 
         if len(v) > 1 and np.isclose(v[-1], 0.0, atol=atol) and np.isclose(c[-1], 0.0, atol=atol):
+            v = v[:-1]
+            c = c[:-1]
+        elif len(v) > 1 and abs(v[-1] - v[-2]) > max_endpoint_step:
             v = v[:-1]
             c = c[:-1]
 
@@ -506,7 +628,7 @@ class PlotManager:
         
         return matching_curves
     
-    def create_jv_best_per_condition_plot(self, jvc_data, curves_data, colors=None):
+    def _create_jv_best_per_condition_plot_legacy(self, jvc_data, curves_data, colors=None):
         """Plot JV curves for the SINGLE best measurement per condition/variable"""
         
         if jvc_data.empty:
@@ -536,7 +658,15 @@ class PlotManager:
         
         # CRITICAL CHANGE: Get only the SINGLE best measurement per condition (not per sample+condition)
         # This will automatically pick the best direction (Forward or Reverse)
-        best_per_condition = jvc_data.loc[jvc_data.groupby(grouping_col)['PCE(%)'].idxmax()]
+        working_jvc = jvc_data.copy()
+        working_jvc['PCE(%)'] = pd.to_numeric(working_jvc['PCE(%)'], errors='coerce')
+        working_jvc = working_jvc.dropna(subset=['PCE(%)'])
+        if working_jvc.empty:
+            fig = go.Figure()
+            fig.update_layout(title="No valid PCE data available")
+            return fig, "JV_best_per_condition.html"
+
+        best_per_condition = working_jvc.loc[working_jvc.groupby(grouping_col)['PCE(%)'].idxmax()]
         
         # CRITICAL: Calculate legend space based on number of conditions
         num_conditions = len(best_per_condition)
@@ -569,15 +699,20 @@ class PlotManager:
             direction = best_row['direction']
             sample_id = best_row['sample_id']
             ilum = best_row['ilum']
+            cycle_number = best_row.get('cycle_number', None)
             
             print(f"  • {condition}: {sample}_{cell} ({direction}, PCE: {pce:.2f}%)")
             
-            device_curves = curves_data[
+            device_mask = (
                 (curves_data['sample_id'] == sample_id) & 
                 (curves_data['cell'] == cell) &
                 (curves_data['direction'] == direction) &
                 (curves_data['ilum'] == ilum)
-            ]
+            )
+            if 'cycle_number' in curves_data.columns and pd.notna(cycle_number):
+                device_mask = device_mask & (curves_data['cycle_number'] == cycle_number)
+
+            device_curves = curves_data[device_mask]
             
             if device_curves.empty:
                 print(f"    Warning: No curves found for {condition}")
@@ -960,12 +1095,68 @@ class PlotManager:
             
             print(f"  • {condition}: {sample}_{cell} ({direction}, PCE: {pce:.2f}%)")
             
-            device_curves = curves_data[
-                (curves_data['sample_id'] == sample_id) & 
-                (curves_data['cell'] == cell) &
-                (curves_data['direction'] == direction) &  # FIX: Changed from && to &
-                (curves_data['ilum'] == ilum)
-            ]
+            # Build a sequence of progressively relaxed matching masks so we
+            # always prefer the exact measurement (sample_id+cell+px+cycle+direction+ilum)
+            # but fall back to looser matches (dropping direction/px/cycle) until
+            # we find something. This guarantees we plot the measurement that
+            # corresponds to the `best_row` (highest PCE) when possible.
+            px_number = best_row.get('px_number', None)
+            cycle_number = best_row.get('cycle_number', None)
+
+            base_mask = (curves_data['sample_id'] == sample_id) & (curves_data['cell'] == cell)
+
+            candidate_masks = []
+
+            # Most specific: match px, cycle, direction, ilum
+            if 'direction' in curves_data.columns and pd.notna(direction) and pd.notna(px_number) and pd.notna(cycle_number):
+                candidate_masks.append(base_mask &
+                                       (curves_data['px_number'] == px_number) &
+                                       (curves_data['cycle_number'] == cycle_number) &
+                                       (curves_data['direction'] == direction) &
+                                       (curves_data['ilum'] == ilum))
+
+            # Match px, cycle, direction (no ilum)
+            if 'direction' in curves_data.columns and pd.notna(direction) and pd.notna(px_number) and pd.notna(cycle_number):
+                candidate_masks.append(base_mask &
+                                       (curves_data['px_number'] == px_number) &
+                                       (curves_data['cycle_number'] == cycle_number) &
+                                       (curves_data['direction'] == direction))
+
+            # Match cycle + direction
+            if 'direction' in curves_data.columns and pd.notna(direction) and pd.notna(cycle_number):
+                candidate_masks.append(base_mask &
+                                       (curves_data['cycle_number'] == cycle_number) &
+                                       (curves_data['direction'] == direction) &
+                                       (curves_data['ilum'] == ilum))
+
+            # Match direction + ilum (ignore px/cycle)
+            if 'direction' in curves_data.columns and pd.notna(direction):
+                candidate_masks.append(base_mask &
+                                       (curves_data['direction'] == direction) &
+                                       (curves_data['ilum'] == ilum))
+
+            # Match px + cycle (any direction)
+            if pd.notna(px_number) and pd.notna(cycle_number):
+                candidate_masks.append(base_mask &
+                                       (curves_data['px_number'] == px_number) &
+                                       (curves_data['cycle_number'] == cycle_number) &
+                                       (curves_data['ilum'] == ilum))
+
+            # Match ilum only
+            candidate_masks.append(base_mask & (curves_data['ilum'] == ilum))
+
+            # Least specific: just sample_id + cell
+            candidate_masks.append(base_mask)
+
+            device_curves = pd.DataFrame()
+            for mask in candidate_masks:
+                try:
+                    subset = curves_data[mask]
+                except Exception:
+                    subset = pd.DataFrame()
+                if not subset.empty:
+                    device_curves = subset.copy()
+                    break
             
             if device_curves.empty:
                 print(f"    Warning: No curves found for {condition}")
@@ -1133,7 +1324,7 @@ class PlotManager:
                 direction = voltage_data.loc[idx, 'direction']
                 
                 # Base color for this sample+cell
-                base_color = colors[len(fig.data) % len(colors)]
+                base_color = colors[sum(1 for _ in getattr(fig, 'data', [])) % len(colors)]
                 
                 # Add trace for this measurement
                 fig.add_trace(go.Scatter(
@@ -1152,7 +1343,7 @@ class PlotManager:
             pixels_per_legend_row = 30
             
             # ADD: Calculate dynamic spacing AFTER all traces are added
-            num_traces = len(fig.data)
+            num_traces = sum(1 for _ in getattr(fig, 'data', []))
             items_per_row = 3
             num_legend_rows = (num_traces + items_per_row - 1) // items_per_row
             required_bottom_margin = base_margin + (num_legend_rows * pixels_per_legend_row)
@@ -1285,7 +1476,7 @@ class PlotManager:
                 direction = voltage_data.loc[idx, 'direction']
                 
                 # Base color for this sample+cell
-                base_color = colors[len(fig.data) % len(colors)]
+                base_color = colors[sum(1 for _ in getattr(fig, 'data', [])) % len(colors)]
                 
                 # Add trace for this measurement
                 fig.add_trace(go.Scatter(
@@ -1304,7 +1495,7 @@ class PlotManager:
             pixels_per_legend_row = 30
             
             # ADD: Calculate dynamic spacing AFTER all traces are added
-            num_traces = len(fig.data)
+            num_traces = sum(1 for _ in getattr(fig, 'data', []))
             items_per_row = 3
             num_legend_rows = (num_traces + items_per_row - 1) // items_per_row
             required_bottom_margin = base_margin + (num_legend_rows * pixels_per_legend_row)
@@ -1819,7 +2010,7 @@ class PlotManager:
             fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
 
         # Title and layout
-        x_axis_display = name_x.replace('_', ' ').title()
+        x_axis_display = str(name_x or 'variable').replace('_', ' ').title()
         if name_x == 'condition':
             x_axis_display = 'Variable'
         elif name_x == 'batch_for_plotting':

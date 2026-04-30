@@ -9,6 +9,7 @@ __created__ = "September 2025"
 
 import ipywidgets as widgets
 from IPython.display import display, clear_output, Markdown, HTML, Javascript
+from typing import Any, cast
 import os
 import io
 import base64
@@ -52,10 +53,13 @@ except ImportError:
 _PPTXGENJS_CDN   = 'https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js'
 _PPTXGENJS_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.pptxgen_cache.js')
 
+# Simple module-level cache to avoid assigning attributes to function objects
+_pptxgenjs_cache: dict = {}
+
 def _load_pptxgenjs():
     """Return PptxGenJS bundle as a string, downloading and caching on first use."""
     # Memory cache
-    mem = getattr(_load_pptxgenjs, '_content', None)
+    mem = _pptxgenjs_cache.get('content')
     if mem:
         return mem
     # Disk: user-placed file takes priority, then our own cache
@@ -66,8 +70,8 @@ def _load_pptxgenjs():
         if os.path.exists(path):
             try:
                 with open(path, 'r', encoding='utf-8') as fh:
-                    _load_pptxgenjs._content = fh.read()
-                return _load_pptxgenjs._content
+                    _pptxgenjs_cache['content'] = fh.read()
+                return _pptxgenjs_cache.get('content')
             except Exception:
                 pass
     # Server-side download (browser is never involved)
@@ -80,7 +84,7 @@ def _load_pptxgenjs():
                 fh.write(content)
         except Exception:
             pass
-        _load_pptxgenjs._content = content
+        _pptxgenjs_cache['content'] = content
         return content
     except Exception:
         return None
@@ -188,7 +192,22 @@ class JVAnalysisApp:
         self.info_ui = InfoUI()  # ADD this line
     
         # Give FilterUI access to DataManager for preview functionality
-        self.filter_ui.data_manager = self.data_manager
+        # Use a typed cast to Any so static analyzers (Pylance) won't flag unknown attributes
+        fi = cast(Any, self.filter_ui)
+        try:
+            if hasattr(fi, 'set_data_manager'):
+                try:
+                    fi.set_data_manager(self.data_manager)
+                except Exception:
+                    pass
+        except Exception:
+            # defensive: ignore any attribute/introspection errors
+            pass
+        # Assign data_manager attribute on the cast object (silences static type checks)
+        try:
+            fi.data_manager = self.data_manager
+        except Exception:
+            pass
             
         # Tab-specific widgets
         self.batch_selection_container = widgets.Output()
@@ -251,6 +270,7 @@ class JVAnalysisApp:
     def _create_tabs(self):
         """Create tab system"""
         self.select_upload_tab = widgets.VBox([
+            self.auth_ui.get_widget(),
             widgets.HTML("<h3>Select Upload</h3>"),
             widgets.HTML("<p><i>Select one or multiple batches</i></p>"),
             self.batch_selection_container,
@@ -327,7 +347,6 @@ class JVAnalysisApp:
     def _on_auth_success(self):
         """Handle successful authentication"""
         self.tabs.selected_index = 0
-        self.auth_ui.close_settings()
         self._init_batch_selection()
     
     def _init_batch_selection(self):
@@ -342,10 +361,25 @@ class JVAnalysisApp:
             try:
                 url = self.auth_manager.url
                 token = self.auth_manager.current_token
+                #print("📊 Initializing batch selection...")
                 batch_selection_widget = create_batch_selection(url, token, self._load_data_from_selection)
                 display(batch_selection_widget)
+            except requests.exceptions.RequestException as e:
+                # Network/server error - show detailed message
+                ErrorHandler.log_error(
+                    "Initializing batch selection - Server Error",
+                    e,
+                    self.batch_selection_container,
+                    show_traceback=True
+                )
             except Exception as e:
-                ErrorHandler.log_error("initializing batch selection", e, self.batch_selection_container)
+                # Other errors
+                ErrorHandler.log_error(
+                    "Initializing batch selection",
+                    e,
+                    self.batch_selection_container,
+                    show_traceback=True
+                )
     
     def _load_data_from_selection(self, batch_selector):
         """Load data from batch selection with user feedback"""
@@ -484,6 +518,9 @@ If you tested specific variables or conditions for each sample, please write the
         """Handle variable retrieval and condition assignment"""
         self.is_conditions = True
         
+        # Ensure conditions_dict always exists to satisfy static analysis
+        conditions_dict = {}
+
         # Create conditions_dict from the text widget values
         data = self.data_manager.get_data()
         if data and 'jvc' in data:
@@ -589,6 +626,8 @@ If you tested specific variables or conditions for each sample, please write the
                 token = self.auth_manager.current_token
                 
                 try:
+                    # Import necessary functions
+                    from api_calls import get_ids_in_batch, get_all_measurements_except_JV
                     sample_ids = get_ids_in_batch(url, token, batch_ids_value)
                     measurements_data = get_all_measurements_except_JV(url, token, sample_ids)
                     
@@ -675,7 +714,7 @@ If you tested specific variables or conditions for each sample, please write the
             
             try:
                 working_data = data["jvc"].copy()
-                original_count = len(working_data)
+                original_count = len(working_data) if working_data is not None else 0
                 
                 # STEP 1: Apply cycle filter based on mode
                 if cycle_settings['mode'] == 'best_only' and self.data_manager.has_cycle_data:
@@ -684,7 +723,7 @@ If you tested specific variables or conditions for each sample, please write the
                         working_data, 
                         verbose=True
                     )
-                    after_cycle_count = len(working_data)
+                    after_cycle_count = len(working_data) if working_data is not None else 0
                     print(f"   Result: {original_count} → {after_cycle_count} records")
                     print()
                     
@@ -695,7 +734,7 @@ If you tested specific variables or conditions for each sample, please write the
                         cycle_settings['cycles'],
                         verbose=True
                     )
-                    after_cycle_count = len(working_data)
+                    after_cycle_count = len(working_data) if working_data is not None else 0
                     print(f"   Result: {original_count} → {after_cycle_count} records")
                     print()
                     
@@ -720,7 +759,7 @@ If you tested specific variables or conditions for each sample, please write the
                 data["jvc"] = original_jvc
                 
                 # STEP 3: Show summary
-                final_count = len(filtered_df)
+                final_count = len(filtered_df) if filtered_df is not None else 0
                 
                 print(f"\n{'='*70}")
                 print(f"📊 FILTERING SUMMARY:")
@@ -737,14 +776,27 @@ If you tested specific variables or conditions for each sample, please write the
                 
                 if final_count > 0:
                     print(f"\n✅ Filtering complete! Proceed to plotting tab.")
-                    
+
                     # Auto-adjust color count based on number of conditions
                     num_conditions = self._count_unique_conditions(filtered_df)
                     if num_conditions > 0:
                         self.color_selector.set_num_colors(num_conditions)
                         print(f"🎨 Auto-adjusted color palette: {num_conditions} colors for {num_conditions} unique conditions")
-                    
+
+                    # Enable and navigate to the Select Plots tab
                     self._enable_tab(3)
+                    try:
+                        # Select the plots tab (index 3)
+                        self.tabs.selected_index = 3
+                    except Exception:
+                        pass
+
+                    # Trigger plot creation automatically (simulate clicking 'Plot Selection')
+                    try:
+                        # Call the same handler used by the Plot button; safe to pass None
+                        self._on_create_plots(None)
+                    except Exception as e:
+                        print(f"⚠️ Auto-plot failed: {e}")
                 else:
                     print(f"\n⚠️  No data remains after filtering. Please adjust filters.")
                 
@@ -789,7 +841,8 @@ If you tested specific variables or conditions for each sample, please write the
         try:
             # Create workbook for Excel export with proper analysis sheets
             wb = openpyxl.Workbook()
-            wb.remove(wb.active)  # Remove default sheet
+            if wb.active is not None:
+                wb.remove(wb.active)  # Remove default sheet
             
             # Add main data sheet first
             main_sheet = wb.create_sheet(title='All_data')
@@ -1398,7 +1451,7 @@ If you tested specific variables or conditions for each sample, please write the
         }
         payload_json = json.dumps(payload)
 
-        js_code = f"""
+        js_code = rf"""
         (async function() {{
             const payload = {payload_json};
             const statusEl = document.getElementById('jv-download-status');
@@ -1429,7 +1482,7 @@ If you tested specific variables or conditions for each sample, please write the
                 const fallback = `plot_${{idx + 1}}`;
                 if (!name) return fallback;
                 const safe = sanitizeName(name);
-                return safe.replace(/\.[a-zA-Z0-9]+$/g, '') || fallback;
+                return safe.replace(/\\.[a-zA-Z0-9]+$/g, '') || fallback;
             }}
 
             async function ensureJsZip() {{
@@ -1597,7 +1650,7 @@ If you tested specific variables or conditions for each sample, please write the
                     for (const asset of payload.table_assets) {{
                         if (!asset || !asset.path || !asset.field_id) continue;
                         const field = document.getElementById(asset.field_id);
-                        const b64 = field ? (field.value || '').replace(/\s+/g, '') : '';
+                        const b64 = field ? (field.value || '').replace(/\\s+/g, '') : '';
                         if (b64) {{
                             zip.file(asset.path, b64, {{ base64: true }});
                         }}
@@ -1668,10 +1721,14 @@ If you tested specific variables or conditions for each sample, please write the
         if filtered_jv_data.empty:
             return pd.DataFrame()
         
+        use_cycle_number = 'cycle_number' in filtered_jv_data.columns and 'cycle_number' in original_curves_data.columns
+
         # Get unique sample_id + cell + direction + ilum combinations from filtered JV
         filtered_combinations = set()
         for _, row in filtered_jv_data.iterrows():
             combination = (row['sample_id'], row['cell'], row['direction'], row['ilum'])
+            if use_cycle_number and 'cycle_number' in row.index and pd.notna(row['cycle_number']):
+                combination = combination + (int(row['cycle_number']),)
             filtered_combinations.add(combination)
         
         # Filter curves data to match exactly
@@ -1679,6 +1736,8 @@ If you tested specific variables or conditions for each sample, please write the
             if 'sample_id' not in curve_row:
                 return False
             combination = (curve_row['sample_id'], curve_row['cell'], curve_row['direction'], curve_row['ilum'])
+            if use_cycle_number and 'cycle_number' in curve_row.index and pd.notna(curve_row['cycle_number']):
+                combination = combination + (int(curve_row['cycle_number']),)
             return combination in filtered_combinations
         
         matching_curves = original_curves_data[original_curves_data.apply(should_include_curve, axis=1)].copy()
@@ -1857,7 +1916,6 @@ If you tested specific variables or conditions for each sample, please write the
         
         return widgets.VBox([
             header,  # Header with What's New and Manual buttons
-            self.auth_ui.get_widget(),
             self.tabs
         ], layout=app_layout)
 

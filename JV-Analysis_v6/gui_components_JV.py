@@ -724,6 +724,10 @@ class FilterUI:
                 print("No samples selected")
                 return
             
+            if not self.sample_data or 'jvc' not in self.sample_data:
+                print("No sample data available")
+                return
+
             df = self.sample_data['jvc']
             
             # Calculate statistics for selected samples

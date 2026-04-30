@@ -12,6 +12,7 @@ import numpy as np
 import os
 import operator
 import sys 
+from typing import Any
 
 # Add parent directory for shared modules
 parent_dir = os.path.dirname(os.getcwd())
@@ -143,7 +144,7 @@ class DataManager:
                       'condition', 'cell', 'direction', 'ilum', 'status', 'sample_id',
                       'px_number', 'cycle_number']
         
-        columns_cur = ['index', 'sample', 'batch', 'condition', 'variable', 'cell', 'direction', 
+        columns_cur: list[Any] = ['index', 'sample', 'batch', 'condition', 'variable', 'cell', 'direction', 
                       'ilum', 'sample_id', 'status', 'px_number', 'cycle_number']
         rows_jvc = []
         rows_cur = []
@@ -164,6 +165,8 @@ class DataManager:
             all_jvs = {}
             successful_batches = []
             failed_batches = []
+
+            batch_ids = batch_ids or []
             
             from api_calls import get_ids_in_batch
             
@@ -447,10 +450,14 @@ class DataManager:
         if not hasattr(self, 'data') or 'curves' not in self.data or filtered_jv_df.empty:
             return pd.DataFrame()
         
+        use_cycle_number = 'cycle_number' in filtered_jv_df.columns and 'cycle_number' in self.data['curves'].columns
+
         # Get unique sample_id + cell + direction + ilum combinations from filtered JV
         filtered_combinations = set()
         for _, row in filtered_jv_df.iterrows():
             combination = (row['sample_id'], row['cell'], row['direction'], row['ilum'])
+            if use_cycle_number and 'cycle_number' in row.index and pd.notna(row['cycle_number']):
+                combination = combination + (int(row['cycle_number']),)
             filtered_combinations.add(combination)
         
         # Filter curves data to match exactly
@@ -458,6 +465,8 @@ class DataManager:
             if 'sample_id' not in curve_row:
                 return False
             combination = (curve_row['sample_id'], curve_row['cell'], curve_row['direction'], curve_row['ilum'])
+            if use_cycle_number and 'cycle_number' in curve_row.index and pd.notna(curve_row['cycle_number']):
+                combination = combination + (int(curve_row['cycle_number']),)
             return combination in filtered_combinations
         
         curves_data = self.data['curves']
