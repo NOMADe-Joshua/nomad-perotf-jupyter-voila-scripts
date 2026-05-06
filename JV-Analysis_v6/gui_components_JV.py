@@ -9,7 +9,7 @@ __created__ = "August 2025"
 #adjusted by Joshua from KIT :)
 
 import ipywidgets as widgets
-from IPython.display import display, clear_output, HTML, Markdown
+from IPython.display import display, clear_output, HTML, Markdown, Javascript
 import base64
 import io
 import zipfile
@@ -17,6 +17,7 @@ import plotly.graph_objects as go
 import requests
 import json
 import plotly.express as px
+from diagnostic_helper_JV import debug_logger
 
 class WidgetFactory:
     @staticmethod
@@ -136,7 +137,7 @@ class AuthenticationUI:
         
         # Settings toggle
         self.settings_toggle_button = WidgetFactory.create_button(
-            description='▼ Connection Settings',
+            description='▶ Connection Settings',
             min_width=False
         )
         self.settings_toggle_button.layout.width = '200px'
@@ -147,7 +148,7 @@ class AuthenticationUI:
             self.local_auth_box,
             self.token_auth_box,
             self.auth_action_box
-        ], layout=widgets.Layout(padding='10px', margin='0 0 10px 0'))
+        ], layout=widgets.Layout(padding='10px', margin='0 0 10px 0', display='none'))
         
         self.settings_box = widgets.VBox([
             self.settings_toggle_button,
@@ -877,6 +878,9 @@ class PlotUI:
                 ("Boxplot", "all", "by Variable")  # Added
             ]
         }
+        self.plot_callback = None
+        self.reorder_update_callback = None  # Callback to notify when reorder changes
+        self.variable_order_state = None
         self._create_widgets()
         self._setup_observers()
         self._load_preset()
@@ -908,6 +912,10 @@ class PlotUI:
             layout=widgets.Layout(margin='10px 0')
         )
         
+        # Variable reordering widget for boxplots
+        self._create_variable_reorder_section()
+        
+        # Controls WITHOUT the reorder section (will be placed separately)
         self.controls = widgets.VBox([
             self.add_button, self.remove_button, 
             self.preset_dropdown, self.load_preset_button,
@@ -1006,6 +1014,498 @@ class PlotUI:
         
         self.groups_container.children = tuple(self.plot_type_groups)
     
+    def _create_variable_reorder_section(self):
+        """Create section for reordering variables in boxplots"""
+        self.variable_reorder_section = widgets.VBox(
+            layout=widgets.Layout(
+                width='100%',
+                border='1px solid #ddd',
+                padding='15px',
+                margin='10px 0',
+                border_radius='8px',
+                background_color='#fafafa',
+                display='none'  # Hidden by default
+            )
+        )
+        
+        # Store for variable order (will be set when data is loaded)
+        self.variable_order_list = []
+        self.variable_move_up_buttons = []
+        self.variable_move_down_buttons = []
+        self.reorder_update_callback = None  # Callback to trigger plot regeneration
+        self.variable_order_state = widgets.Text(
+            value='[]',
+            layout=widgets.Layout(display='none')
+        )
+        self.variable_order_state.add_class('reorder-order-state')
+        self.variable_order_state.observe(self._on_variable_order_state_change, names='value')
+    
+    def update_variable_reorder(self, available_variables):
+        """Update variable reorder section with available variables"""
+        debug_logger.add('REORDER', f"update_variable_reorder() called with: {available_variables}")
+        
+        if not available_variables or len(available_variables) == 0:
+            debug_logger.add('REORDER', f"No variables provided, hiding widget")
+            self.variable_reorder_section.layout.display = 'none'
+            return
+        
+        self.variable_order_list = list(available_variables)
+        debug_logger.add('REORDER', f"Saved variable_order_list: {self.variable_order_list}")
+        if self.variable_order_state is not None:
+            self.variable_order_state.value = json.dumps(self.variable_order_list)
+        
+        self.variable_move_up_buttons = []
+        self.variable_move_down_buttons = []
+        
+        # Build table rows as HTML
+        table_rows_html = ""
+        for i, var in enumerate(self.variable_order_list):
+            # Parse batch and variation names
+            if '&' in str(var):
+                parts = str(var).split('&', 1)
+                batch_name = parts[0].strip()
+                variation_name = parts[1].strip()
+            else:
+                batch_name = "Unknown"
+                variation_name = str(var)
+            
+            # Create HTML row with drag-and-drop (no buttons - drag-and-drop only)
+            row_html = f"""
+            <tr class="reorder-row" draggable="true" data-index="{i}" data-value="{var}">
+                <td style="text-align: center; color: #999; cursor: grab;"><span class="reorder-drag-handle">≡</span></td>
+                <td style="text-align: center; font-weight:600; color:#667eea; font-size:16px;">
+                    <span class="reorder-number">{i+1}</span>
+                </td>
+                <td>
+                    <div style="display:flex; gap:20px; align-items:center;">
+                        <span style="color:#999; font-size:13px;">{batch_name}</span>
+                        <span style="color:#667eea; font-weight:600;">{variation_name}</span>
+                    </div>
+                </td>
+            </tr>
+            """
+            table_rows_html += row_html
+        
+        # Create full HTML table with drag-and-drop support
+        html_content = f"""
+        <style>
+            .reorder-table {{
+                width: 100%;
+                border-collapse: collapse;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            }}
+            .reorder-table tr {{
+                border-bottom: 1px solid #e0e0e0;
+            }}
+            .reorder-table tr:hover {{
+                background-color: #f5f5f5;
+            }}
+            .reorder-table td {{
+                padding: 12px;
+                vertical-align: middle;
+            }}
+            .reorder-row {{
+                cursor: move;
+                transition: background-color 0.2s;
+                user-select: none;
+            }}
+            .reorder-row:hover {{
+                background-color: #f0f7ff !important;
+            }}
+            .reorder-row.drag-over {{
+                background-color: #e3f2fd;
+                border-top: 3px solid #667eea;
+            }}
+            .reorder-drag-handle {{
+                cursor: grab;
+                color: #999;
+                font-size: 18px;
+                padding: 0 8px;
+            }}
+            .reorder-drag-handle:active {{
+                cursor: grabbing;
+            }}
+        </style>
+        
+        <div id="reorder_container">
+            <table class="reorder-table">
+                <thead>
+                    <tr style="background-color: #f9f9f9; border-bottom: 2px solid #ddd;">
+                        <th style="width: 30px; text-align: center;">≡</th>
+                        <th style="width: 60px; text-align: center;">#</th>
+                        <th>Variation</th>
+                    </tr>
+                </thead>
+                <tbody id="reorder_tbody">
+                    {table_rows_html}
+                </tbody>
+            </table>
+            <input type="hidden" id="reorder_hidden_order" value="{json.dumps(list(available_variables))}">
+        </div>
+        """
+        
+        # Create the HTML widget
+        table_widget = widgets.HTML(html_content)
+        
+        # Add title and instructions
+        title = widgets.HTML(
+            "<div style='font-size: 15px; font-weight: 600; margin-bottom: 12px; color: #333;'>"
+            "📊 Reorder Variables for Boxplots</div>"
+        )
+        
+        instructions = widgets.HTML(
+            "<div style='font-size: 12px; color: #666; margin-bottom: 15px; background: #f0f7ff; padding: 10px; border-left: 4px solid #667eea; border-radius: 4px;'>"
+            "<b>💡 Instructions:</b> Drag the ≡ handle to reorder variations. The new order will be applied when you click <b>Plot Selection</b>.</div>"
+        )
+        
+        # Create container with all components (no Apply button - use Plot Selection instead)
+        all_widgets = [title, instructions, table_widget, self.variable_order_state]
+        
+        self.variable_reorder_section.children = all_widgets
+        self.variable_reorder_section.layout = widgets.Layout(
+            width='100%',
+            border='1px solid #ddd',
+            padding='15px',
+            margin='10px 0',
+            border_radius='8px',
+            background_color='#fafafa'
+        )
+        
+        # Add JavaScript for drag and drop
+        self._setup_drag_and_drop()
+        
+        debug_logger.add('REORDER', f"Widget updated and displayed")
+    
+    def _setup_comm_handler(self):
+        """Legacy no-op: Comm-based sync removed in favor of widget-state sync."""
+        return
+    
+    def _setup_drag_and_drop(self):
+        """Setup JavaScript for drag and drop functionality"""
+        js_code = """
+        (function() {
+            setTimeout(function() {
+                const tbody = document.querySelector('#reorder_tbody');
+                if (!tbody) {
+                    console.log('[DND] Tbody not found');
+                    return;
+                }
+                
+                const rows = tbody.querySelectorAll('tr.reorder-row');
+                console.log('[DND] Found ' + rows.length + ' draggable rows');
+                
+                let draggedElement = null;
+                
+                rows.forEach((row, index) => {
+                    row.addEventListener('dragstart', function(e) {
+                        draggedElement = this;
+                        this.style.opacity = '0.5';
+                        e.dataTransfer.effectAllowed = 'move';
+                        e.dataTransfer.setData('text/html', this.innerHTML);
+                        console.log('[DND] Started dragging row ' + (index + 1));
+                    });
+                    
+                    row.addEventListener('dragend', function(e) {
+                        this.style.opacity = '1';
+                        rows.forEach(r => r.classList.remove('drag-over'));
+                    });
+                    
+                    row.addEventListener('dragover', function(e) {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        this.classList.add('drag-over');
+                    });
+                    
+                    row.addEventListener('dragleave', function(e) {
+                        if (e.target === this) {
+                            this.classList.remove('drag-over');
+                        }
+                    });
+                    
+                    row.addEventListener('drop', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        this.classList.remove('drag-over');
+                        
+                        if (draggedElement && draggedElement !== this) {
+                            const allRows = Array.from(tbody.querySelectorAll('tr.reorder-row'));
+                            const draggedIndex = allRows.indexOf(draggedElement);
+                            const targetIndex = allRows.indexOf(this);
+                            
+                            if (draggedIndex < targetIndex) {
+                                this.parentNode.insertBefore(draggedElement, this.nextSibling);
+                            } else {
+                                this.parentNode.insertBefore(draggedElement, this);
+                            }
+                            
+                            console.log('[DND] Dropped at new position');
+                            updateNumbersAfterDrag();
+                            sendReorderToCommHandler();
+                        }
+                    });
+                });
+                
+                window.updateNumbersAfterDrag = function() {
+                    const allRows = tbody.querySelectorAll('tr.reorder-row');
+                    allRows.forEach((row, idx) => {
+                        const numSpan = row.querySelector('.reorder-number');
+                        if (numSpan) {
+                            numSpan.textContent = (idx + 1);
+                        }
+                    });
+                };
+
+                window.syncReorderStateToWidget = function(newOrder) {
+                    try {
+                        const serialized = JSON.stringify(newOrder || []);
+                        const stateInput = document.querySelector('.reorder-order-state input, .reorder-order-state textarea');
+                        if (stateInput) {
+                            stateInput.value = serialized;
+                            stateInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            stateInput.dispatchEvent(new Event('change', { bubbles: true }));
+                            console.log('[DND-STATE] Synced order to hidden widget');
+                        } else {
+                            console.log('[DND-STATE] Hidden reorder state widget not found');
+                        }
+
+                        const hiddenInput = document.querySelector('#reorder_hidden_order');
+                        if (hiddenInput) {
+                            hiddenInput.value = serialized;
+                        }
+                    } catch (err) {
+                        console.log('[DND-STATE] Error syncing state:', err);
+                    }
+                };
+                
+                window.sendReorderToCommHandler = function(action) {
+                    const allRows = tbody.querySelectorAll('tr.reorder-row');
+                    const newOrder = [];
+                    allRows.forEach((row) => {
+                        const value = row.getAttribute('data-value');
+                        if (value) {
+                            newOrder.push(value);
+                        }
+                    });
+                    console.log('[DND-ORDER] New order to sync:', newOrder);
+                    const commAction = action || 'reorder';
+
+                    // Sync via hidden ipywidget state
+                    if (typeof window.syncReorderStateToWidget === 'function') {
+                        window.syncReorderStateToWidget(newOrder);
+                    }
+                    console.log('[DND-SYNC] Synced order to widget-state only (action=' + commAction + ')');
+                };
+
+                // Initialize hidden state with current DOM order
+                window.sendReorderToCommHandler('sync_order');
+                
+            }, 100);
+        })();
+        """
+        
+        # Display JavaScript widget (hidden but executes)
+        display(Javascript(js_code))
+    
+    def _extract_variable_order_from_current_dom(self):
+        """Extract variable order by reading the data-index attribute values in DOM order"""
+        try:
+            if not hasattr(self, 'variable_order_list') or not self.variable_order_list:
+                debug_logger.add('REORDER', f"[DOM_EXTRACT] No variable_order_list to work with")
+                return None
+            
+            debug_logger.add('REORDER', f"[DOM_EXTRACT] Attempting to extract from DOM using data-index")
+            
+            # We'll read the rows by their data-index values and reconstruct the order
+            # The key insight: the data-index attribute tells us which variable is at each position
+            
+            # Since we can't directly access the DOM from Python, we'll use the current HTML state
+            # and try to infer the new order by looking at the row order
+            
+            # Fallback: use variable_order_list with re-read attempt
+            # This is a workaround - we use the HTML widget's current value
+            if hasattr(self, 'variable_reorder_section') and self.variable_reorder_section.children:
+                for widget in self.variable_reorder_section.children:
+                    if hasattr(widget, 'value') and 'reorder_tbody' in str(widget.value):
+                        html_str = str(widget.value)
+                        
+                        # Extract rows with their full HTML to maintain order
+                        import re
+                        # Find all rows in the order they appear in the HTML
+                        pattern = r'<tr[^>]*data-value="([^"]*)"[^>]*data-index="(\d+)"'
+                        matches = re.findall(pattern, html_str)
+                        
+                        if not matches:
+                            # Try alternate pattern without data-index
+                            pattern = r'<tr[^>]*data-value="([^"]*)"'
+                            matches = re.findall(pattern, html_str)
+                        
+                        if matches:
+                            # Extract just the values in their current order
+                            order = [match[0] if isinstance(match, tuple) else match for match in matches]
+                            debug_logger.add('REORDER', f"[DOM_EXTRACT] Found order: {order}")
+                            return order
+            
+            debug_logger.add('REORDER', f"[DOM_EXTRACT] Could not extract from DOM")
+            return None
+        except Exception as e:
+            debug_logger.add('REORDER', f"[DOM_EXTRACT] Error: {e}")
+            import traceback
+            debug_logger.add('REORDER', f"[DOM_EXTRACT] Traceback: {traceback.format_exc()}")
+            return None
+    
+    def _make_move_up_handler(self, index):
+        """Create handler for move up with correct index captured"""
+        def handler(btn):
+            self._move_variable_up(index)
+        return handler
+    
+    def _make_move_down_handler(self, index):
+        """Create handler for move down with correct index captured"""
+        def handler(btn):
+            self._move_variable_down(index)
+        return handler
+    
+    def _move_variable_up(self, index):
+        """Move variable up in the list"""
+        if index > 0:
+            debug_logger.add('REORDER', f"Moving '{self.variable_order_list[index]}' up from position {index}")
+            self.variable_order_list[index], self.variable_order_list[index-1] = \
+                self.variable_order_list[index-1], self.variable_order_list[index]
+            debug_logger.add('REORDER', f"New order: {self.variable_order_list}")
+            self.update_variable_reorder(self.variable_order_list)
+            if self.reorder_update_callback:
+                self.reorder_update_callback()
+    
+    def _move_variable_down(self, index):
+        """Move variable down in the list"""
+        if index < len(self.variable_order_list) - 1:
+            debug_logger.add('REORDER', f"Moving '{self.variable_order_list[index]}' down from position {index}")
+            self.variable_order_list[index], self.variable_order_list[index+1] = \
+                self.variable_order_list[index+1], self.variable_order_list[index]
+            debug_logger.add('REORDER', f"New order: {self.variable_order_list}")
+            self.update_variable_reorder(self.variable_order_list)
+            if self.reorder_update_callback:
+                self.reorder_update_callback()
+    
+    def _extract_variable_order_from_html(self):
+        """Extract the current variable order from the HTML table by reading data-value from rows"""
+        try:
+            if not hasattr(self, 'variable_reorder_section') or not self.variable_reorder_section.children:
+                debug_logger.add('REORDER', f"[EXTRACT] No reorder_section found")
+                return None
+            
+            # Look for table widget in children
+            for widget in self.variable_reorder_section.children:
+                if hasattr(widget, 'value') and '<table' in str(widget.value) and 'reorder_tbody' in str(widget.value):
+                    # Found the HTML table
+                    html_content = str(widget.value)
+                    debug_logger.add('REORDER', f"[EXTRACT] Found HTML table widget")
+                    
+                    # Parse the data-value attributes from rows in order
+                    import re
+                    # Find all data-value attributes in tr elements (in document order)
+                    pattern = r'<tr[^>]*data-value="([^"]*)"'
+                    matches = re.findall(pattern, html_content)
+                    
+                    if matches and len(matches) > 0:
+                        debug_logger.add('REORDER', f"[EXTRACT] Found {len(matches)} rows with data-value attributes")
+                        debug_logger.add('REORDER', f"[EXTRACT] Extracted order: {matches}")
+                        return matches
+                    else:
+                        debug_logger.add('REORDER', f"[EXTRACT] No rows found with data-value attributes")
+            
+            debug_logger.add('REORDER', f"[EXTRACT] Could not find HTML table")
+            return None
+        except Exception as e:
+            debug_logger.add('REORDER', f"[EXTRACT] Error: {e}")
+            import traceback
+            debug_logger.add('REORDER', f"[EXTRACT] Traceback: {traceback.format_exc()}")
+            return None
+    
+    def sync_variable_order_from_dom(self):
+        """Read the current variable order from the DOM and update variable_order_list"""
+        try:
+            debug_logger.add('REORDER', f"[DOM_SYNC] Reading current DOM order for variables...")
+            
+            # Send JavaScript code to read and return the current DOM order
+            js_code = """
+            (function() {
+                if (typeof window.sendReorderToCommHandler === 'function') {
+                    window.sendReorderToCommHandler('sync_order');
+                    return;
+                }
+
+                const tbody = document.querySelector('#reorder_tbody');
+                if (!tbody) {
+                    console.log('[DOM_SYNC-JS] Could not find tbody element');
+                    return;
+                }
+
+                const rows = Array.from(tbody.querySelectorAll('tr.reorder-row'));
+                const currentOrder = rows.map(row => row.getAttribute('data-value')).filter(v => v);
+                console.log('[DOM_SYNC-JS] Current DOM order:', currentOrder);
+
+                if (typeof window.syncReorderStateToWidget === 'function') {
+                    window.syncReorderStateToWidget(currentOrder);
+                }
+            })();
+            """
+            
+            debug_logger.add('REORDER', f"[DOM_SYNC] Executing JavaScript to read DOM...")
+            display(Javascript(js_code))
+            debug_logger.add('REORDER', f"[DOM_SYNC] JavaScript executed")
+            
+        except Exception as e:
+            import traceback
+            debug_logger.add('REORDER', f"[DOM_SYNC] Error: {e}")
+            debug_logger.add('REORDER', f"[DOM_SYNC] Traceback: {traceback.format_exc()}")
+
+    def _on_variable_order_state_change(self, change):
+        """Update Python-side order when hidden state widget value changes from JS."""
+        try:
+            if change.get('name') != 'value':
+                return
+            raw = change.get('new', '')
+            if not raw:
+                return
+            parsed = json.loads(raw)
+            if isinstance(parsed, list) and len(parsed) > 0:
+                self.variable_order_list = [str(v) for v in parsed]
+                debug_logger.add('REORDER', f"[STATE] variable_order_list updated from hidden widget: {self.variable_order_list}")
+        except Exception as e:
+            debug_logger.add('REORDER', f"[STATE] Failed to parse hidden reorder state: {e}")
+    
+    def get_variable_order(self):
+        """Get current variable order from variable_order_list"""
+        try:
+            debug_logger.add('PLOT', f"[GET_ORDER] get_variable_order() called")
+            debug_logger.add('PLOT', f"[GET_ORDER] hasattr(self, 'variable_order_list'): {hasattr(self, 'variable_order_list')}")
+
+            # Prefer hidden widget state if available (robust fallback when custom Comm is unavailable)
+            if self.variable_order_state is not None and self.variable_order_state.value:
+                try:
+                    parsed_state = json.loads(self.variable_order_state.value)
+                    if isinstance(parsed_state, list) and len(parsed_state) > 0:
+                        self.variable_order_list = [str(v) for v in parsed_state]
+                        debug_logger.add('PLOT', f"[GET_ORDER] Refreshed from hidden widget state: {self.variable_order_list}")
+                except Exception as state_err:
+                    debug_logger.add('PLOT', f"[GET_ORDER] Could not parse hidden widget state: {state_err}")
+            
+            if hasattr(self, 'variable_order_list'):
+                result = self.variable_order_list
+                debug_logger.add('PLOT', f"[GET_ORDER] variable_order_list exists, length: {len(result)}")
+                debug_logger.add('PLOT', f"[GET_ORDER] variable_order_list contents: {result}")
+            else:
+                result = []
+                debug_logger.add('PLOT', f"[GET_ORDER] variable_order_list does not exist, returning empty list")
+            
+            return result
+        except Exception as e:
+            debug_logger.add('PLOT', f"[GET_ORDER] Error: {e}")
+            import traceback
+            debug_logger.add('PLOT', f"[GET_ORDER] Traceback: {traceback.format_exc()}")
+            return self.variable_order_list if hasattr(self, 'variable_order_list') else []
+    
     def get_plot_selections(self):
         """Get current plot selections"""
         selections = []
@@ -1020,6 +1520,10 @@ class PlotUI:
         """Set callback for plot button"""
         self.plot_button.on_click(callback)
     
+    def set_reorder_update_callback(self, callback):
+        """Set callback for when reorder changes (called by move buttons)"""
+        self.reorder_update_callback = callback
+    
     def get_separate_scan_dir(self):
         """Get whether to separate scan directions"""
         return self.separate_scan_dir_checkbox.value
@@ -1029,8 +1533,223 @@ class PlotUI:
         return widgets.VBox([
             widgets.HTML("<h3>Select Plots</h3>"),
             widgets.HTML("<p>Using the dropdowns below, select the plots you want to create.</p>"),
-            widgets.HBox([self.controls, self.groups_container])
+            widgets.HBox([self.controls, self.groups_container]),
+            self.variable_reorder_section  # Full width below the controls
         ])
+
+
+class JVCurveAnalysisUI:
+    """UI for detailed JV curve analysis with independent filtering."""
+
+    def __init__(self):
+        self.filter_rows = []
+        self.filter_columns = [
+            'Voc(V)', 'Jsc(mA/cm2)', 'FF(%)', 'PCE(%)',
+            'V_mpp(V)', 'J_mpp(mA/cm2)', 'P_mpp(mW/cm2)',
+            'R_series(Ohmcm2)', 'R_shunt(Ohmcm2)'
+        ]
+        self._create_widgets()
+        self._setup_observers()
+
+    def _create_widgets(self):
+        self.mode_dropdown = widgets.Dropdown(
+            options=[
+                ('Best device per condition', 'best_per_condition'),
+                ('All filtered JV curves', 'all_filtered')
+            ],
+            value='best_per_condition',
+            description='Plot mode:',
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(width='320px')
+        )
+
+        self.scale_dropdown = widgets.Dropdown(
+            options=[
+                ('Linear', 'linear'),
+                ('Logarithmic ln(|J|)', 'log_e')
+            ],
+            value='linear',
+            description='Current axis:',
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(width='320px')
+        )
+
+        self.exclude_conditions_select = widgets.SelectMultiple(
+            options=[],
+            value=(),
+            description='Exclude conditions:',
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(width='360px', height='140px')
+        )
+
+        self.pixel_select = widgets.SelectMultiple(
+            options=[],
+            value=(),
+            description='Pixels:',
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(width='300px', height='140px')
+        )
+
+        self.cycle_select = widgets.SelectMultiple(
+            options=[],
+            value=(),
+            description='Cycles:',
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(width='240px', height='140px')
+        )
+
+        self.add_filter_button = WidgetFactory.create_button("Add Filter", 'primary')
+        self.remove_filter_button = WidgetFactory.create_button("Remove Filter", 'danger')
+        self.plot_button = WidgetFactory.create_button("Plot JV Curves", 'success')
+
+        self.numeric_filter_rows = widgets.VBox()
+        self._add_filter_row(None)
+
+        self.status_output = WidgetFactory.create_output(scrollable=False, border=True)
+        self.plotted_content = WidgetFactory.create_output(scrollable=False, border=True)
+
+        mode_box = widgets.VBox([
+            widgets.HTML("<b>Plot Settings</b>"),
+            self.mode_dropdown,
+            self.scale_dropdown
+        ])
+
+        category_box = widgets.VBox([
+            widgets.HTML("<b>Condition Filter</b>"),
+            widgets.HTML("<p style='margin:0 0 8px 0; color:#666;'>Select conditions to exclude from this analysis tab only.</p>"),
+            self.exclude_conditions_select
+        ])
+
+        pixel_cycle_box = widgets.VBox([
+            widgets.HTML("<b>Pixel / Cycle Filters</b>"),
+            widgets.HTML("<p style='margin:0 0 8px 0; color:#666;'>If nothing is selected, all pixels/cycles are included.</p>"),
+            widgets.HBox([self.pixel_select, self.cycle_select])
+        ])
+
+        numeric_box = widgets.VBox([
+            widgets.HTML("<b>Numeric Filters</b>"),
+            widgets.HTML("<p style='margin:0 0 8px 0; color:#666;'>Works like Select Filters, but independently for this tab.</p>"),
+            widgets.HBox([self.add_filter_button, self.remove_filter_button]),
+            self.numeric_filter_rows
+        ])
+
+        controls_section = widgets.VBox([
+            widgets.HBox([mode_box, category_box]),
+            pixel_cycle_box,
+            numeric_box,
+            widgets.HBox([self.plot_button])
+        ], layout=widgets.Layout(border='1px solid #ddd', padding='12px', margin='8px 0'))
+
+        self.layout = widgets.VBox([
+            widgets.HTML("<h3>JV Curve Analysis</h3>"),
+            widgets.HTML("<p>Analyze JV curves with independent filters (not tied to Select Filters).</p>"),
+            controls_section,
+            self.status_output,
+            widgets.HTML("<h4>Generated JV Curve Analysis Plot</h4>"),
+            self.plotted_content
+        ])
+
+    def _setup_observers(self):
+        self.add_filter_button.on_click(self._add_filter_row)
+        self.remove_filter_button.on_click(self._remove_filter_row)
+
+    def _create_numeric_filter_row(self):
+        column_dropdown = widgets.Dropdown(
+            options=self.filter_columns,
+            value=self.filter_columns[0],
+            layout=widgets.Layout(width='42%')
+        )
+        operator_dropdown = widgets.Dropdown(
+            options=['>', '>=', '<', '<=', '==', '!='],
+            value='>',
+            layout=widgets.Layout(width='18%')
+        )
+        value_input = widgets.Text(
+            placeholder='Value',
+            layout=widgets.Layout(width='20%')
+        )
+        return widgets.HBox([column_dropdown, operator_dropdown, value_input])
+
+    def _add_filter_row(self, _):
+        self.filter_rows.append(self._create_numeric_filter_row())
+        self.numeric_filter_rows.children = tuple(self.filter_rows)
+
+    def _remove_filter_row(self, _):
+        if len(self.filter_rows) > 1:
+            self.filter_rows.pop()
+            self.numeric_filter_rows.children = tuple(self.filter_rows)
+
+    def set_data(self, data):
+        """Update condition/pixel/cycle options from loaded JV data."""
+        if not data or 'jvc' not in data or data['jvc'].empty:
+            self.exclude_conditions_select.options = []
+            self.exclude_conditions_select.value = ()
+            self.pixel_select.options = []
+            self.pixel_select.value = ()
+            self.cycle_select.options = []
+            self.cycle_select.value = ()
+            return
+
+        df = data['jvc']
+
+        if 'condition' in df.columns:
+            conditions = sorted([str(v) for v in df['condition'].dropna().unique().tolist()])
+        else:
+            conditions = sorted([str(v) for v in df['sample'].dropna().unique().tolist()])
+        self.exclude_conditions_select.options = conditions
+        self.exclude_conditions_select.value = tuple(v for v in self.exclude_conditions_select.value if v in conditions)
+
+        if 'px_number' in df.columns:
+            pixels = sorted([str(v) for v in df['px_number'].dropna().unique().tolist()])
+        else:
+            pixels = []
+        self.pixel_select.options = pixels
+        self.pixel_select.value = tuple(v for v in self.pixel_select.value if v in pixels)
+
+        if 'cycle_number' in df.columns and df['cycle_number'].notna().any():
+            cycles = sorted([int(v) for v in df['cycle_number'].dropna().unique().tolist()])
+            cycle_options = [(f"Cycle {c}", c) for c in cycles]
+        else:
+            cycle_options = []
+        self.cycle_select.options = cycle_options
+        valid_cycle_values = {v for _, v in cycle_options}
+        self.cycle_select.value = tuple(v for v in self.cycle_select.value if v in valid_cycle_values)
+
+    def get_plot_mode(self):
+        return self.mode_dropdown.value
+
+    def use_log_current(self):
+        return self.scale_dropdown.value == 'log_e'
+
+    def get_excluded_conditions(self):
+        return list(self.exclude_conditions_select.value)
+
+    def get_selected_pixels(self):
+        return [str(v) for v in self.pixel_select.value]
+
+    def get_selected_cycles(self):
+        return [int(v) for v in self.cycle_select.value]
+
+    def get_numeric_filters(self):
+        filters = []
+        for group in self.filter_rows:
+            column = group.children[0].value
+            operator = group.children[1].value
+            raw_value = str(group.children[2].value).strip()
+            if raw_value == '':
+                continue
+            try:
+                float(raw_value)
+            except ValueError:
+                continue
+            filters.append((column, operator, raw_value))
+        return filters
+
+    def set_plot_callback(self, callback):
+        self.plot_button.on_click(callback)
+
+    def get_widget(self):
+        return self.layout
 
 
 class SaveUI:

@@ -12,7 +12,7 @@ import numpy as np
 import os
 import operator
 import sys 
-from typing import Any
+from typing import Any, cast
 
 # Add parent directory for shared modules
 parent_dir = os.path.dirname(os.getcwd())
@@ -910,3 +910,126 @@ class DataManager:
                         print(f"      Cycle {int(cycle)}: {count} measurements")
         
         return filtered_data
+    
+    def export_detailed_pixel_data(self, filtered_data=None, omitted_data=None, verbose=True):
+        """
+        Export detailed pixel-level data with filter information and champion/median markings.
+        
+        Creates a comprehensive dataset with:
+        - All JV parameters per sample/pixel/cycle
+        - Filter status (included/excluded)
+        - Filter reason for excluded data
+        - Champion/median marking per variation
+        
+        Args:
+            filtered_data: DataFrame of accepted data (default: self.filtered_data)
+            omitted_data: DataFrame of rejected data (default: self.omitted_data)
+            verbose: Print export statistics
+        
+        Returns:
+            DataFrame with all data + metadata columns
+        """
+        if filtered_data is None:
+            filtered_data = self.filtered_data if self.filtered_data is not None else pd.DataFrame()
+        if omitted_data is None:
+            omitted_data = self.omitted_data if self.omitted_data is not None else pd.DataFrame()
+        
+        if filtered_data.empty and omitted_data.empty:
+            if verbose:
+                print("Warning: No data available for export")
+            return pd.DataFrame()
+        
+        # Add filter status to both datasets
+        filtered_copy = filtered_data.copy() if not filtered_data.empty else pd.DataFrame()
+        omitted_copy = omitted_data.copy() if not omitted_data.empty else pd.DataFrame()
+        
+        if not filtered_copy.empty:
+            filtered_copy['filter_status'] = 'Included'
+            if 'filter_reason' not in filtered_copy.columns:
+                filtered_copy['filter_reason'] = ''
+        
+        if not omitted_copy.empty:
+            omitted_copy['filter_status'] = 'Excluded'
+            if 'filter_reason' not in omitted_copy.columns:
+                omitted_copy['filter_reason'] = ''
+        
+        # Combine datasets
+        combined = pd.concat([filtered_copy, omitted_copy], ignore_index=True)
+        
+        if combined.empty:
+            if verbose:
+                print("Warning: No data after combining filtered and omitted")
+            return combined
+        
+        # Add champion/median columns per variation
+        # Use 'identifier' column if available (contains variation info)
+        groupby_col = 'identifier' if 'identifier' in combined.columns else 'sample'
+        
+        # Calculate champion and median for each parameter per variation
+        params = ['Voc(V)', 'Jsc(mA/cm2)', 'FF(%)', 'PCE(%)']
+        
+        for param in params:
+            if param in combined.columns:
+                combined[f'{param}_champion'] = ''
+                combined[f'{param}_median'] = ''
+        
+        for variation in combined[groupby_col].unique():
+            variation_mask = (combined[groupby_col] == variation) & (combined['filter_status'] == 'Included')
+            
+            if variation_mask.sum() == 0:
+                continue
+            
+            for param in params:
+                if param in combined.columns:
+                    variation_data = combined.loc[variation_mask, param]
+                    # Ensure pandas Series for type checking
+                    if isinstance(variation_data, pd.Series) and len(variation_data) > 0:
+                        # Champion: highest PCE or highest value of the parameter
+                        champion_idx = variation_data.idxmax()
+                        combined.loc[champion_idx, f'{param}_champion'] = 'Champion'
+                        
+                        # Median
+                        if len(variation_data) > 1:
+                            median_val = variation_data.median()
+                            # Find closest to median: compute differences and get absolute values
+                            diff = cast(pd.Series, variation_data - median_val)
+                            closest_idx = diff.abs().idxmin()
+                            combined.loc[closest_idx, f'{param}_median'] = 'Median'
+        
+        # Reorder columns for better readability
+        base_cols = [
+            'sample', 'cell', 'px_number', 'cycle_number',
+            'Voc(V)', 'Jsc(mA/cm2)', 'FF(%)', 'PCE(%)',
+            'V_mpp(V)', 'J_mpp(mA/cm2)', 'P_mpp(mW/cm2)',
+            'R_series(Ohmcm2)', 'R_shunt(Ohmcm2)',
+            'direction', 'ilum', 'status',
+            'filter_status', 'filter_reason', 'identifier'
+        ]
+        
+        champion_median_cols = [col for col in combined.columns if 'champion' in col or 'median' in col]
+        
+        other_cols = [col for col in combined.columns if col not in base_cols + champion_median_cols]
+        
+        final_cols = [col for col in base_cols if col in combined.columns] + champion_median_cols + other_cols
+        
+        export_df = combined[final_cols].copy()
+        
+        if verbose:
+            print(f"\nDetailed Export Summary:")
+            print(f"   Total records: {len(export_df)}")
+            print(f"   Included (passing filters): {len(export_df[export_df['filter_status'] == 'Included'])}")
+            print(f"   Excluded (filtered out): {len(export_df[export_df['filter_status'] == 'Excluded'])}")
+            
+            if 'identifier' in export_df.columns:
+                unique_vars = export_df['identifier'].nunique()
+                print(f"   Unique variations: {unique_vars}")
+            
+            # Show sample of filter reasons
+            excluded_df = export_df[export_df['filter_status'] == 'Excluded']
+            if not excluded_df.empty and 'filter_reason' in excluded_df.columns:
+                unique_reasons = excluded_df['filter_reason'].value_counts()
+                print(f"\n   Top filter reasons:")
+                for reason, count in unique_reasons.head(5).items():
+                    print(f"      • {reason}: {count}")
+        
+        return export_df

@@ -17,6 +17,7 @@ import zipfile
 import requests
 import json
 import sys
+import time
 from utils_JV import save_combined_excel_data
 from resizable_plot_utility_JV import ResizablePlotManager
 import openpyxl
@@ -24,6 +25,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 import plotly.graph_objects as go
 import pandas as pd
 from datetime import datetime
+from diagnostic_helper_JV import debug_logger
 
 # Add parent directory for shared modules
 parent_dir = os.path.dirname(os.getcwd())
@@ -32,6 +34,7 @@ if parent_dir not in sys.path:
 
 # Import the new organized modules
 from gui_components_JV import AuthenticationUI, FilterUI, PlotUI, SaveUI, ColorSchemeSelector, InfoUI
+from jv_curve_analysis_ui_NEW import EnhancedJVCurveAnalysisUI
 from font_size_ui_JV import FontSizeUI
 from data_manager_JV import DataManager
 from plot_manager_JV import plotting_string_action, PlotManager
@@ -186,6 +189,7 @@ class JVAnalysisApp:
         self.auth_ui = AuthenticationUI(self.auth_manager)
         self.filter_ui = FilterUI()
         self.plot_ui = PlotUI()
+        self.jv_curve_analysis_ui = EnhancedJVCurveAnalysisUI()
         self.save_ui = SaveUI()
         self.color_selector = ColorSchemeSelector()
         self.font_size_ui = FontSizeUI(callback=self._on_font_size_change)  # ADD this line
@@ -279,11 +283,7 @@ class JVAnalysisApp:
         
         self.add_variables_tab = widgets.VBox([
             widgets.HTML("<h3>Add Variable Names</h3>"),
-            self.dynamic_content,
-            widgets.HTML("<h3>Download Data</h3>"),
-            widgets.VBox([self.download_content]),
-            widgets.HTML("<h3>Other Measurements</h3>"),
-            widgets.VBox([self.show_other_measurements])
+            self.dynamic_content
         ])
         
         # Create plot tab with color selector and font size controls
@@ -300,6 +300,8 @@ class JVAnalysisApp:
         
         self.tabs = widgets.Tab()
 
+        self.jv_curve_analysis_tab = self.jv_curve_analysis_ui.get_widget()
+
         self.download_tab = widgets.VBox([
             widgets.HTML("<h3>Download</h3>"),
             widgets.HTML("<p>Create one ZIP containing live plots as SVG/PNG plus a variation summary table.</p>"),
@@ -308,28 +310,90 @@ class JVAnalysisApp:
             self.download_pptx_output
         ])
 
+        # Create debug dashboard tab
+
+
         self.tabs.children = [
             self.select_upload_tab,
             self.add_variables_tab,
             self.filter_ui.get_widget(),
             plot_tab_content,
+            self.jv_curve_analysis_tab,
             self.download_tab
         ]
         
-        tab_labels = ['Select Upload', 'Add Variable Names', 'Select Filters', 'Select Plots', 'Download']
+        tab_labels = ['Select Upload', 'Add Variable Names', 'Select Filters', 'Select Plots', 'JV Curve Analysis', 'Download']
         for i, title in enumerate(tab_labels):
             self.tabs.set_title(i, title)
+    
+    def _create_debug_dashboard(self):
+        """Create a dashboard for viewing debug logs"""
+        refresh_button = widgets.Button(
+            description='🔄 Refresh Logs',
+            button_style='info',
+            layout=widgets.Layout(width='150px')
+        )
+        
+        clear_button = widgets.Button(
+            description='🗑️ Clear Logs',
+            button_style='warning',
+            layout=widgets.Layout(width='150px')
+        )
+        
+        self.debug_output = widgets.HTML()
+        
+        def on_refresh_click(b):
+            self.debug_output.value = debug_logger.get_html()
+        
+        def on_clear_click(b):
+            debug_logger.clear()
+            self.debug_output.value = "<p style='color: #999;'>Logs cleared</p>"
+        
+        refresh_button.on_click(on_refresh_click)
+        clear_button.on_click(on_clear_click)
+        
+        # Initialize with current logs
+        self.debug_output.value = debug_logger.get_html()
+        
+        return widgets.VBox([
+            widgets.HTML("<h3>🔧 Variable Reordering & Plot Debug Logs</h3>"),
+            widgets.HTML("<p>Monitor the variable reordering process and plot generation here:</p>"),
+            widgets.HBox([refresh_button, clear_button]),
+            widgets.HTML("<hr style='margin: 15px 0;'>"),
+            self.debug_output
+        ], layout=widgets.Layout(
+            border='1px solid #ddd',
+            padding='15px',
+            margin='0'
+        ))
+    
+    def _update_debug_display(self):
+        """Refresh debug output if the debug dashboard exists."""
+        if hasattr(self, 'debug_output'):
+            self.debug_output.value = debug_logger.get_html()
+    
     
     def _setup_callbacks(self):
         """Setup all callbacks"""
         self.auth_ui.set_success_callback(self._on_auth_success)
         self.filter_ui.set_apply_callback(self._on_apply_filters)
         self.plot_ui.set_plot_callback(self._on_create_plots)
+        self.jv_curve_analysis_ui.set_plot_callback(self._on_create_curve_analysis_plot)
+        self.plot_ui.set_reorder_update_callback(self._on_variable_order_changed)
         self.default_variables.observe(self._on_change_default_variables, names=['value'])
         self.download_button.on_click(self._download_jv_data)
         self.download_curves_button.on_click(self._download_curves_data)
         self.download_zip_button.on_click(self._on_download_zip_clicked)
         self.download_pptx_button.on_click(self._on_download_pptx_clicked)
+    
+    def _on_variable_order_changed(self):
+        """Handle when variable order is changed - update debug and regenerate plots"""
+        current_order = self.plot_ui.get_variable_order()
+        debug_logger.add('PLOT', f"[REORDER CALLBACK] Current variable order: {current_order}")
+        self._update_debug_display()
+        # Regenerate plots with new variable order
+        debug_logger.add('PLOT', f"[REORDER CALLBACK] Regenerating plots with new order")
+        self._on_create_plots(None)
     
     def _auto_authenticate(self):
         """Auto-authenticate based on environment"""
@@ -423,6 +487,7 @@ class JVAnalysisApp:
             
             # Set data for FilterUI
             self.filter_ui.set_sample_data(data)
+            self.jv_curve_analysis_ui.set_data(data)
             
             # Show general data summary
             with self.load_status_output:
@@ -448,7 +513,7 @@ class JVAnalysisApp:
         
         variables_markdown = f"""
 # Add variable names
-There are {len(unique_vals)} samples found.
+There are {len(unique_vals)} variations found.
 If you tested specific variables or conditions for each sample, please write them down below.
 """
         
@@ -555,6 +620,7 @@ If you tested specific variables or conditions for each sample, please write the
             # Update FilterUI with the new condition data
             updated_data = self.data_manager.get_data()
             self.filter_ui.set_sample_data(updated_data)
+            self.jv_curve_analysis_ui.set_data(updated_data)
             
             with self.read_output:
                 clear_output()
@@ -782,6 +848,31 @@ If you tested specific variables or conditions for each sample, please write the
                     if num_conditions > 0:
                         self.color_selector.set_num_colors(num_conditions)
                         print(f"🎨 Auto-adjusted color palette: {num_conditions} colors for {num_conditions} unique conditions")
+                    
+                    # Update variable reorder widget with available variations
+                    if filtered_df is not None and not filtered_df.empty:
+                        debug_logger.add('PLOT', f"filtered_df columns: {list(filtered_df.columns)}")
+                        debug_logger.add('PLOT', f"filtered_df shape: {filtered_df.shape}")
+                        
+                        if 'identifier' in filtered_df.columns:
+                            available_vars = list(filtered_df['identifier'].unique())
+                            debug_logger.add('PLOT', f"Using 'identifier' column, found {len(available_vars)} unique values")
+                        elif 'condition' in filtered_df.columns:
+                            available_vars = list(filtered_df['condition'].unique())
+                            debug_logger.add('PLOT', f"Using 'condition' column, found {len(available_vars)} unique values")
+                        elif 'sample' in filtered_df.columns:
+                            available_vars = list(filtered_df['sample'].unique())
+                            debug_logger.add('PLOT', f"Using 'sample' column, found {len(available_vars)} unique values")
+                        else:
+                            available_vars = []
+                            debug_logger.add('PLOT', "No suitable column found for reordering!")
+                        
+                        debug_logger.add('PLOT', f"available_vars: {available_vars}")
+                        
+                        if len(available_vars) > 0:
+                            self.plot_ui.update_variable_reorder(available_vars)
+                            print(f"📊 Variable reordering enabled: {len(available_vars)} variations available")
+                            self._update_debug_display()
 
                     # Enable and navigate to the Select Plots tab
                     self._enable_tab(3)
@@ -839,6 +930,19 @@ If you tested specific variables or conditions for each sample, please write the
             """))
         
         try:
+            # First, sync the variable order from the DOM (if user dragged and dropped)
+            debug_logger.add('PLOT', f"=== SYNCING VARIABLE ORDER FROM DOM ===")
+            self.plot_ui.sync_variable_order_from_dom()
+            
+            # Give it a moment for the Comm to process (JavaScript is async)
+            time.sleep(0.2)
+            
+            # Get variable order for sorting
+            variable_order = self.plot_ui.get_variable_order()
+            debug_logger.add('PLOT', f"=== PLOT GENERATION START ===")
+            debug_logger.add('PLOT', f"Variable order from UI: {variable_order}")
+            debug_logger.add('PLOT', f"Variable order is empty: {not variable_order or len(variable_order) == 0}")
+            
             # Create workbook for Excel export with proper analysis sheets
             wb = openpyxl.Workbook()
             if wb.active is not None:
@@ -854,6 +958,59 @@ If you tested specific variables or conditions for each sample, please write the
             filtered_jv = data.get('filtered')
             complete_jv = data.get('jvc')
             filtered_curves = data.get('filtered_curves', data.get('curves'))  # Use filtered curves or fall back to all curves
+            
+            debug_logger.add('PLOT', f"filtered_jv shape: {filtered_jv.shape if filtered_jv is not None else 'None'}")
+            debug_logger.add('PLOT', f"filtered_jv columns: {filtered_jv.columns.tolist() if filtered_jv is not None else 'None'}")
+            
+            # Apply variable ordering to filtered_jv if order is specified
+            if variable_order and len(variable_order) > 0 and filtered_jv is not None:
+                debug_logger.add('PLOT', f"[ORDER] ✓ Proceeding with variable order application")
+                debug_logger.add('PLOT', f"[ORDER] Applying variable order to {len(filtered_jv)} rows")
+                # Determine which column contains the variation info
+                if 'identifier' in filtered_jv.columns:
+                    order_col = 'identifier'
+                elif 'condition' in filtered_jv.columns:
+                    order_col = 'condition'
+                elif 'sample' in filtered_jv.columns:
+                    order_col = 'sample'
+                else:
+                    order_col = None
+                
+                debug_logger.add('PLOT', f"[ORDER] Using column '{order_col}' for ordering")
+                if order_col is not None:
+                    unique_before = filtered_jv[order_col].unique().tolist()
+                    debug_logger.add('PLOT', f"[ORDER] Unique values BEFORE ordering: {unique_before}")
+                    debug_logger.add('PLOT', f"[ORDER] Requested order: {variable_order}")
+                    
+                    # Check if all requested categories exist in data
+                    missing_categories = [cat for cat in variable_order if cat not in unique_before]
+                    extra_categories = [cat for cat in unique_before if cat not in variable_order]
+                    if missing_categories:
+                        debug_logger.add('PLOT', f"[ORDER] WARNING: Missing categories in data: {missing_categories}")
+                    if extra_categories:
+                        debug_logger.add('PLOT', f"[ORDER] WARNING: Extra categories in data (not in order): {extra_categories}")
+                    
+                    # Convert to categorical with specified order, then sort
+                    debug_logger.add('PLOT', f"[ORDER] Converting to categorical...")
+                    filtered_jv[order_col] = pd.Categorical(
+                        filtered_jv[order_col], 
+                        categories=variable_order, 
+                        ordered=True
+                    )
+                    debug_logger.add('PLOT', f"[ORDER] Sorting by {order_col}...")
+                    filtered_jv = filtered_jv.sort_values(order_col)
+                    unique_after = filtered_jv[order_col].unique().tolist()
+                    debug_logger.add('PLOT', f"[ORDER] Unique values AFTER ordering: {unique_after}")
+                else:
+                    debug_logger.add('PLOT', f"[ORDER] ✗ Could not determine order_col")
+            else:
+                debug_logger.add('PLOT', f"[ORDER] ✗ SKIPPED variable order application")
+                debug_logger.add('PLOT', f"[ORDER]   - variable_order provided: {variable_order is not None and len(variable_order) > 0}")
+                debug_logger.add('PLOT', f"[ORDER]   - variable_order value: {variable_order}")
+                debug_logger.add('PLOT', f"[ORDER]   - filtered_jv is not None: {filtered_jv is not None}")
+            
+            # Update debug display after ordering logic
+            self._update_debug_display()
             
             # Prepare support data tuple
             omitted_jv = data.get('junk', pd.DataFrame())
@@ -1019,6 +1176,188 @@ If you tested specific variables or conditions for each sample, please write the
                 """))
             ErrorHandler.handle_plot_error(e, self.plot_ui.plotted_content)
 
+    def _apply_curve_analysis_filters(self, jvc_df):
+        """Apply numeric filters for curve analysis (separate from sample selection)."""
+        if jvc_df is None or jvc_df.empty:
+            return pd.DataFrame()
+
+        filtered_df = jvc_df.copy()
+
+        # Apply condition exclusion
+        excluded_conditions = set(self.jv_curve_analysis_ui.get_excluded_conditions())
+        if excluded_conditions and 'condition' in filtered_df.columns:
+            filtered_df = filtered_df[~filtered_df['condition'].astype(str).isin(excluded_conditions)]
+
+        # Apply numeric filters FIRST (before sample selection)
+        operators = {
+            '>': lambda series, val: series > val,
+            '>=': lambda series, val: series >= val,
+            '<': lambda series, val: series < val,
+            '<=': lambda series, val: series <= val,
+            '==': lambda series, val: series == val,
+            '!=': lambda series, val: series != val,
+        }
+
+        for column, op, raw_value in self.jv_curve_analysis_ui.get_numeric_filters():
+            if column not in filtered_df.columns or op not in operators:
+                continue
+
+            threshold = float(raw_value)
+            numeric_series = pd.to_numeric(filtered_df[column], errors='coerce')
+            mask = operators[op](numeric_series, threshold)
+            filtered_df = filtered_df[mask.fillna(False)]
+
+        return filtered_df
+
+    def _on_create_curve_analysis_plot(self, b):
+        """Create enhanced JV Curve Analysis plot with all new features."""
+        data = self.data_manager.get_data()
+        if not data or 'jvc' not in data or data['jvc'] is None or data['jvc'].empty:
+            with self.jv_curve_analysis_ui.status_output:
+                clear_output(wait=True)
+                print("No data loaded. Please load a batch first.")
+            with self.jv_curve_analysis_ui.plotted_content:
+                clear_output(wait=True)
+                print("No data available for JV curve analysis.")
+            return
+
+        with self.jv_curve_analysis_ui.plotted_content:
+            clear_output(wait=True)
+            display(widgets.HTML("""
+            <div style="text-align: center; padding: 24px; background-color: #f8f9fa; border-radius: 8px; border: 1px solid #ddd;">
+                <h4 style="margin: 0; color: #007bff;">Generating JV Curve Analysis Plot...</h4>
+            </div>
+            """))
+
+        try:
+            source_jv = data['jvc']
+            
+            # Apply numeric filters and condition exclusion
+            filtered_jv = self._apply_curve_analysis_filters(source_jv)
+
+            with self.jv_curve_analysis_ui.status_output:
+                clear_output(wait=True)
+                print("JV Curve Analysis Filter Summary")
+                print(f"Original records: {len(source_jv)}")
+                print(f"After numeric + condition filters: {len(filtered_jv)}")
+
+                excluded_conditions = self.jv_curve_analysis_ui.get_excluded_conditions()
+                numeric_filters = self.jv_curve_analysis_ui.get_numeric_filters()
+                sample_filters = self.jv_curve_analysis_ui.get_sample_specific_filters()
+
+                print(f"Excluded conditions: {len(excluded_conditions)}")
+                print(f"Numeric filters: {len(numeric_filters)}")
+                if sample_filters:
+                    samples_with_filters = [s for s in sample_filters if sample_filters[s]['pixels'] or sample_filters[s]['cycles']]
+                    print(f"Samples with specific pixel/cycle selection: {len(samples_with_filters)}")
+
+            if filtered_jv.empty:
+                with self.jv_curve_analysis_ui.plotted_content:
+                    clear_output(wait=True)
+                    print("No JV records remain after filters. Please relax your filters.")
+                return
+
+            if 'curves' not in data or data['curves'] is None or data['curves'].empty:
+                with self.jv_curve_analysis_ui.plotted_content:
+                    clear_output(wait=True)
+                    print("No JV curve data available.")
+                return
+
+            filtered_curves = self.data_manager._create_matching_curves_from_filtered_jv(filtered_jv)
+
+            # Get color scheme from UI
+            color_scheme_name = self.jv_curve_analysis_ui.get_color_scheme()
+            color_list = self._get_plotly_colors(color_scheme_name, num_colors=12)
+
+            # Get font sizes
+            font_size_settings = self.font_size_ui.get_font_sizes()
+            
+            # Create plot manager and set parameters
+            plot_manager = PlotManager()
+            plot_manager.set_output_path(os.getcwd())
+            plot_manager.set_font_sizes(
+                axis_size=font_size_settings.get('font_size_axis'),
+                title_size=font_size_settings.get('font_size_title'),
+                legend_size=font_size_settings.get('font_size_legend')
+            )
+            plot_manager.set_jv_line_width(font_size_settings.get('jv_line_width'))
+
+            # Get plot configuration from UI
+            plot_mode = self.jv_curve_analysis_ui.get_plot_mode()
+            use_log_current = self.jv_curve_analysis_ui.use_log_current()
+            plot_style = self.jv_curve_analysis_ui.get_plot_style()
+            legend_config = self.jv_curve_analysis_ui.get_legend_config()
+            use_plot_filter = self.jv_curve_analysis_ui.use_plot_filter()
+            sample_filters = self.jv_curve_analysis_ui.get_sample_specific_filters()
+
+            # Create the enhanced plot
+            fig, fig_name = plot_manager.create_enhanced_jv_curve_plot(
+                filtered_jv,
+                filtered_curves,
+                mode=plot_mode,
+                log_current=use_log_current,
+                colors=color_list,
+                plot_style=plot_style,
+                sample_filters=sample_filters,
+                legend_config=legend_config,
+                use_plot_filter=use_plot_filter
+            )
+
+            title = "JV Curve Analysis - Best device per condition"
+            if plot_mode == 'all_curves_unfiltered':
+                title = "JV Curve Analysis - All JV Curves (unfiltered)"
+            if use_log_current:
+                title += " (ln|J|)"
+
+            subtitle = f"{len(filtered_jv)} JV measurements shown"
+
+            with self.jv_curve_analysis_ui.plotted_content:
+                clear_output(wait=True)
+                ResizablePlotManager.display_plots_resizable(
+                    [fig],
+                    [fig_name],
+                    titles=[title],
+                    subtitles=[subtitle],
+                    container_widget=self.jv_curve_analysis_ui.plotted_content
+                )
+
+        except Exception as e:
+            with self.jv_curve_analysis_ui.plotted_content:
+                clear_output(wait=True)
+                display(widgets.HTML(f"""
+                <div style="text-align: center; padding: 24px; background-color: #f8d7da; border-radius: 8px;">
+                    <h4 style="margin: 0; color: #dc3545;">JV Curve Analysis failed</h4>
+                    <p style="margin: 8px 0 0 0;">{str(e)}</p>
+                </div>
+                """))
+            ErrorHandler.handle_plot_error(e, self.jv_curve_analysis_ui.plotted_content)
+
+    def _get_plotly_colors(self, color_scheme, num_colors=12):
+        """Get Plotly colors from a scheme name."""
+        import plotly.express as px
+        
+        color_schemes = {
+            'viridis': px.colors.sequential.Viridis,
+            'plasma': px.colors.sequential.Plasma,
+            'inferno': px.colors.sequential.Inferno,
+            'magma': px.colors.sequential.Magma,
+            'blues': px.colors.sequential.Blues,
+            'reds': px.colors.sequential.Reds,
+            'greens': px.colors.sequential.Greens,
+            'plotly': px.colors.qualitative.Plotly,
+            'set1': px.colors.qualitative.Set1,
+            'set2': px.colors.qualitative.Set2
+        }
+        
+        colors = color_schemes.get(color_scheme.lower(), px.colors.sequential.Viridis)
+        
+        # Sample evenly if we need more colors than available
+        if num_colors <= len(colors):
+            return colors[:num_colors]
+        else:
+            indices = [int(i * len(colors) / num_colors) for i in range(num_colors)]
+            return [colors[i] for i in indices]
+
     def _sanitize_filename(self, value):
         """Return a filesystem-safe filename stem."""
         if value is None:
@@ -1099,7 +1438,7 @@ If you tested specific variables or conditions for each sample, please write the
         if summary_df.empty:
             return summary_df
 
-        return summary_df.sort_values(by=['Variation']).reset_index(drop=True)
+        return summary_df.reset_index(drop=True)
 
     def _render_summary_table_image_bytes(self, summary_df, image_format='png'):
         """Render summary DataFrame as an image/PDF table and return bytes."""
@@ -1410,6 +1749,39 @@ If you tested specific variables or conditions for each sample, please write the
         pdf_bytes = self._render_summary_table_image_bytes(summary_df, image_format='pdf')
         if pdf_bytes:
             assets.append({'path': 'table/jv_variation_summary.pdf', 'bytes': pdf_bytes})
+
+        # ADD: Generate detailed pixel-level export
+        try:
+            from utils_JV import generate_detailed_export_excel
+            
+            # Get filtered and omitted data from data_manager
+            filtered_data = self.data_manager.get_filtered_data()
+            omitted_data = self.data_manager.get_omitted_data()
+            
+            # Export detailed data
+            export_df = self.data_manager.export_detailed_pixel_data(
+                filtered_data=filtered_data,
+                omitted_data=omitted_data,
+                verbose=False
+            )
+            
+            if not export_df.empty:
+                # Generate Excel workbook
+                detail_wb = generate_detailed_export_excel(export_df, filtered_info=None)
+                
+                # Convert to bytes
+                detail_bytes_io = io.BytesIO()
+                detail_wb.save(detail_bytes_io)
+                detail_bytes = detail_bytes_io.getvalue()
+                
+                assets.append({
+                    'path': 'table/jv_detailed_pixel_data.xlsx',
+                    'bytes': detail_bytes
+                })
+        except Exception as e:
+            print(f"Warning: Could not generate detailed export: {e}")
+            import traceback
+            traceback.print_exc()
 
         return assets
 

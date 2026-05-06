@@ -3,6 +3,55 @@ Diagnostic Helper
 Quick checks for data structure and values
 """
 
+class DebugLogger:
+    """Collect debug messages for display in UI"""
+    def __init__(self):
+        self.messages = []
+    
+    def add(self, category, message):
+        """Add a debug message"""
+        self.messages.append({
+            'category': category,
+            'message': message
+        })
+    
+    def clear(self):
+        """Clear all messages"""
+        self.messages = []
+    
+    def get_html(self):
+        """Get formatted HTML for display"""
+        if not self.messages:
+            return "<p style='color: #999;'>No debug messages yet</p>"
+        
+        html = "<div style='font-family: monospace; font-size: 12px; max-height: 400px; overflow-y: auto; background: #f5f5f5; padding: 10px; border-radius: 3px;'>"
+        
+        for msg in self.messages:
+            category = msg['category']
+            text = msg['message']
+            
+            # Color code by category
+            if category == 'REORDER':
+                color = '#0066cc'  # Blue
+            elif category == 'PLOT':
+                color = '#009900'  # Green
+            elif category == 'ERROR':
+                color = '#cc0000'  # Red
+            elif category == 'WARNING':
+                color = '#ff6600'  # Orange
+            else:
+                color = '#333333'  # Dark gray
+            
+            html += f"<div style='color: {color}; margin: 2px 0;'>[{category}] {text}</div>"
+        
+        html += "</div>"
+        return html
+
+
+# Global debug logger instance
+debug_logger = DebugLogger()
+
+
 def diagnose_direction_values(data_manager):
     """Diagnose what direction values are actually in the loaded data"""
     if not data_manager.has_data():
@@ -123,3 +172,4 @@ def add_diagnostic_button_to_app(app):
         margin='20px 0',
         border_radius='5px'
     ))
+
