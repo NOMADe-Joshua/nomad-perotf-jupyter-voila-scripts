@@ -12,7 +12,49 @@ import re
 import io
 import zipfile
 from datetime import datetime
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
+
+
+def parse_filename_base(filename: str, suffix: str) -> Tuple[str, int]:
+    """
+    Strip file suffix, datetime stamp, and optional cycle info from a filename.
+
+    Expected tail pattern: [_Cycle_{N}]_{YYMMDD}_{HHMMSS}{suffix}
+
+    Returns:
+        (base_name, cycle_number)  –  cycle_number defaults to 0 if not in filename
+    """
+    # Strip suffix (case-insensitive)
+    if filename.lower().endswith(suffix.lower()):
+        name = filename[:-len(suffix)]
+    else:
+        name = os.path.splitext(filename)[0]
+
+    # Strip trailing datetime stamp  _YYMMDD_HHMMSS
+    name = re.sub(r'_\d{6}_\d{6}$', '', name)
+
+    # Extract and strip optional _Cycle_N
+    cycle_match = re.search(r'_Cycle_(\d+)$', name, re.IGNORECASE)
+    if cycle_match:
+        cycle_num = int(cycle_match.group(1))
+        name = name[:cycle_match.start()]
+    else:
+        cycle_num = 0
+
+    return name, cycle_num
+
+
+def extract_channel_from_block(block_lines: List[str]) -> Optional[int]:
+    """Extract the channel/pixel number from a block header line.
+
+    Block header format: Time(s):...,Channel:N,...
+    Returns the integer channel number, or None if not found.
+    """
+    if block_lines:
+        match = re.search(r'Channel:(\d+)', block_lines[0])
+        if match:
+            return int(match.group(1))
+    return None
 
 
 def parse_sample_blocks(lines: List[str]) -> List[List[str]]:
@@ -119,51 +161,105 @@ def process_single_file(file_content: str, original_filename: str, output_folder
     
     # Parse blocks
     blocks = parse_sample_blocks(lines[data_start_idx:])
-    
-    # Process pairs of scans
+
+    # Resolve base name and starting cycle from the filename
+    original_base = None
+    base_cycle = 0
+    for ext in ("_ivraw.csv", ".jv.csv", ".csv"):
+        if original_filename.lower().endswith(ext):
+            original_base, base_cycle = parse_filename_base(original_filename, ext)
+            break
+    if original_base is None:
+        original_base = os.path.splitext(original_filename)[0]
+
+    # channel -> next cycle number to assign (starts at base_cycle per channel)
+    channel_cycle_counter: Dict[int, int] = {}
+
+    # Process pairs of scans (forward + reverse per channel)
     for idx in range(0, len(blocks), 2):
         try:
             forward_lines = blocks[idx]
             reverse_lines = blocks[idx + 1]
         except IndexError:
             continue
-        
+
         forward = parse_scan(forward_lines)
         reverse = parse_scan(reverse_lines)
-        
+
         if not forward or not reverse:
             continue
-        
-        scan_index = idx // 2 + 1
-        
-        # Generate output filename
-        orig_basename = original_filename
-        original_base = None
-        cycle = 0
-        
-        for ext in ("_ivraw.csv", ".jv.csv", ".csv"):
-            if orig_basename.lower().endswith(ext):
-                # Remove extension plus 14 extra characters (datetime stamp)
-                original_base = orig_basename[:-len(ext)-14]
-                
-                # Check if cycle 0 exists and modify cycle number accordingly
-                # Files are usually measured in order and sorted in the folder
-                if output_folder:
-                    check_path = os.path.join(output_folder, f"{original_base}.px{scan_index}Cycle_0.jv.csv")
-                    if os.path.exists(check_path):
-                        cycle = 1
-                    else:
-                        cycle = 0
-                break
-        
-        if original_base is None:
-            original_base = os.path.splitext(orig_basename)[0]
-        
-        filename = f"{original_base}.px{scan_index}Cycle_{cycle}.jv.csv"
+
+        # Prefer channel number from block header; fall back to sequential index
+        channel = extract_channel_from_block(forward_lines)
+        if channel is None:
+            channel = idx // 2 + 1
+
+        # Determine cycle for this channel occurrence
+        current_cycle = channel_cycle_counter.get(channel, base_cycle)
+
+        # Resolve filename conflicts (e.g. if the same channel/cycle combo
+        # was already produced by a previous measurement in this file)
+        filename = f"{original_base}.px{channel}Cycle_{current_cycle}.jv.csv"
+        while filename in results:
+            current_cycle += 1
+            filename = f"{original_base}.px{channel}Cycle_{current_cycle}.jv.csv"
+
+        # Advance counter so the next occurrence of this channel gets Cycle+1
+        channel_cycle_counter[channel] = current_cycle + 1
+
         content = format_old_file(sample_name, area, is_illuminated, date, forward, reverse, comment)
         results[filename] = content
-    
+
     return results
+
+
+def process_pt_file(file_content: str, original_filename: str) -> Dict[str, str]:
+    """
+    Process a PT (MPP tracking) file.
+
+    Skips the file if it contains no numeric data rows after the column header.
+    Pixel number is read from the "Discharge Channel: N" metadata line.
+    Cycle number is parsed from the filename; defaults to 0 if absent.
+
+    Returns:
+        {output_filename: original_file_content}  or  {} when file is empty
+    """
+    lines = [line.strip() for line in file_content.split('\n') if line.strip()]
+
+    # Locate the data-header line (starts with "Time(s)")
+    data_header_idx = None
+    for i, line in enumerate(lines):
+        if line.startswith('Time(s)'):
+            data_header_idx = i
+            break
+
+    if data_header_idx is None:
+        return {}
+
+    # Check for at least one numeric data row after the header
+    has_data = False
+    for line in lines[data_header_idx + 1:]:
+        try:
+            float(line.split(',')[0].strip())
+            has_data = True
+            break
+        except (ValueError, IndexError):
+            continue
+
+    if not has_data:
+        return {}
+
+    # Extract pixel from "Discharge Channel: N" in the metadata section
+    pixel = 1
+    for line in lines[:data_header_idx]:
+        match = re.match(r'Discharge\s+Channel\s*:\s*(\d+)', line, re.IGNORECASE)
+        if match:
+            pixel = int(match.group(1))
+            break
+
+    base_name, cycle_num = parse_filename_base(original_filename, '_PT.csv')
+    output_filename = f"{base_name}.px{pixel}Cycle_{cycle_num}.mpp.csv"
+    return {output_filename: file_content}
 
 
 def process_files(files_dict: Dict[str, bytes], output_folder: str = "") -> Tuple[bytes, int]:
@@ -196,9 +292,14 @@ def process_files(files_dict: Dict[str, bytes], output_folder: str = "") -> Tupl
                 except Exception:
                     continue
             
-            # Process file
-            results = process_single_file(file_content, filename, output_folder)
-            
+            # Route to the appropriate processor
+            if filename.lower().endswith('_pt.csv'):
+                results = process_pt_file(file_content, filename)
+            elif filename.lower().endswith('_iv.csv'):
+                continue  # summary files – skip
+            else:
+                results = process_single_file(file_content, filename, output_folder)
+
             # Add results to zip
             for output_name, output_content in results.items():
                 zip_file.writestr(output_name, output_content)
@@ -223,7 +324,7 @@ def process_zip_file(zip_content: bytes) -> Tuple[bytes, int]:
     # Extract files from input zip
     with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_ref:
         for file_info in zip_ref.filelist:
-            if file_info.filename.lower().endswith(('_ivraw.csv', '.jv.csv', '.csv')):
+            if file_info.filename.lower().endswith(('_ivraw.csv', '_pt.csv', '.jv.csv', '.csv')):
                 files_dict[os.path.basename(file_info.filename)] = zip_ref.read(file_info)
     
     return process_files(files_dict)
