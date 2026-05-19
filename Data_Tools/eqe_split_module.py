@@ -97,7 +97,7 @@ def parse_eqe_file(content: str) -> List[Dict]:
                     continue
                     
                 try:
-                    lambda_val = float(lambda_cell)
+                    lambda_val = float(lambda_cell.replace(',', '.'))
                     
                     # Get EQE, SR, Jsc from next columns
                     eqe_val = 0.0
@@ -106,19 +106,22 @@ def parse_eqe_file(content: str) -> List[Dict]:
                     
                     if data_col_start + 1 < len(row):
                         try:
-                            eqe_val = float(row[data_col_start + 1].strip() or 0)
+                            cell = row[data_col_start + 1].strip().replace(',', '.')
+                            eqe_val = float(cell or 0)
                         except ValueError:
                             pass
                     
                     if data_col_start + 2 < len(row):
                         try:
-                            sr_val = float(row[data_col_start + 2].strip() or 0)
+                            cell = row[data_col_start + 2].strip().replace(',', '.')
+                            sr_val = float(cell or 0)
                         except ValueError:
                             pass
                     
                     if data_col_start + 3 < len(row):
                         try:
-                            jsc_val = float(row[data_col_start + 3].strip() or 0)
+                            cell = row[data_col_start + 3].strip().replace(',', '.')
+                            jsc_val = float(cell or 0)
                         except ValueError:
                             pass
                     
@@ -215,11 +218,11 @@ def process_eqe_file(file_content: bytes, file_configs: List[Dict]) -> Dict:
     Returns:
         Dictionary with generated files: {filename: content}
     """
-    # Convert bytes to string
-    if isinstance(file_content, bytes):
-        text_content = file_content.decode('utf-8', errors='ignore')
+    # Convert bytes / bytearray / memoryview to string
+    if isinstance(file_content, (bytes, bytearray, memoryview)):
+        text_content = bytes(file_content).decode('utf-8', errors='ignore')
     else:
-        text_content = file_content
+        text_content = str(file_content)
     
     # Parse measurements
     measurements = parse_eqe_file(text_content)
@@ -257,11 +260,17 @@ def process_eqe_file(file_content: bytes, file_configs: List[Dict]) -> Dict:
         n = config.get('n', None)
         m = config.get('m', None)
         
+        # Per-measurement overrides fall back to global if not set
+        meas_name = config.get('name') or name
+        meas_date = config.get('date') or date
+        meas_batch = config.get('batch') or batch
+        meas_a = config.get('a') or a
+        
         if not b:
             raise ValueError(f"Missing required parameter 'B' for measurement {meas_idx + 1}")
         
         # Generate filename
-        filename = generate_filename(name, date, batch, a, b, position, n, m)
+        filename = generate_filename(meas_name, meas_date, meas_batch, meas_a, b, position, n, m)
         
         # Format content
         content = format_eqe_output(measurement, global_config)
