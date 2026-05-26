@@ -463,6 +463,51 @@ class ResizablePlotManager:
         else:
             ResizablePlotManager._display_plots_internal(figs, names, titles, subtitles)
     @staticmethod
+    def _build_jv_legend_table(fig):
+        """Extract trace names/colors from a JV figure and return an HTML legend table."""
+        entries = []
+        seen = set()
+        for trace in fig.data:
+            name = getattr(trace, 'name', None) or ''
+            if not name or name in seen:
+                continue
+            if not getattr(trace, 'showlegend', True):
+                continue
+            seen.add(name)
+            color = '#888'
+            line = getattr(trace, 'line', None)
+            if line and getattr(line, 'color', None):
+                color = line.color
+            elif hasattr(trace, 'marker') and getattr(trace.marker, 'color', None):
+                color = trace.marker.color
+            entries.append((name, color))
+
+        if not entries:
+            return ''
+
+        # One entry per row (vertical layout)
+        rows_html = ''
+        for entry_name, entry_color in entries:
+            swatch = (
+                f'<span style="display:inline-block;width:24px;height:3px;'
+                f'background:{entry_color};vertical-align:middle;'
+                f'border-radius:2px;margin-right:6px;"></span>'
+            )
+            rows_html += (
+                f'<tr><td style="padding:3px 0;white-space:nowrap;font-size:12px;">'
+                f'{swatch}{entry_name}</td></tr>'
+            )
+
+        return (
+            f'<div style="margin:4px 0 24px 0;padding:8px 14px;'
+            f'background:#fafafa;border:1px solid #ddd;border-radius:6px;'
+            f'display:inline-block;font-family:sans-serif;">'
+            f'<div style="font-weight:bold;font-size:12px;color:#666;margin-bottom:6px;">Legend</div>'
+            f'<table style="border-collapse:collapse;">{rows_html}</table>'
+            f'</div>'
+        )
+
+    @staticmethod
     def _display_plots_internal(figs, names, titles=None, subtitles=None):  # ADD parameters
         """Internal method to display plots"""
         from IPython.display import clear_output
@@ -478,8 +523,14 @@ class ResizablePlotManager:
                 display_title = titles[i] if titles and i < len(titles) else name
                 subtitle = subtitles[i] if subtitles and i < len(subtitles) else None
 
+                is_jv_curve = name.lower().startswith("jv_")
+
+                # For JV curve plots: hide the in-figure legend (will be shown as table below)
+                if is_jv_curve:
+                    fig.update_layout(showlegend=False)
+
                 # Determine appropriate size based on plot type
-                if "jv_curve" in name.lower() or "jv curve" in name.lower():
+                if is_jv_curve:
                     width, height = 800, 600
                 elif "boxplot" in name.lower():
                     width, height = 900, 600
@@ -488,6 +539,12 @@ class ResizablePlotManager:
                 
                 # Create and display resizable plot WITH TITLE, SUBTITLE AND FILENAME
                 display_resizable_plot(fig, display_title, width, height, subtitle, filename=name)
+
+                # For JV curve plots: display legend as a table below the plot
+                if is_jv_curve:
+                    legend_html = ResizablePlotManager._build_jv_legend_table(fig)
+                    if legend_html:
+                        display(HTML(legend_html))
                 
             except Exception as e:
                 print(f"❌ Error displaying plot {i+1} ({name}): {e}")

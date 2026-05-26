@@ -869,13 +869,12 @@ class PlotUI:
                 ("Boxplot", "all", "by Variable")  # Added
             ],
             "Advanced Analysis": [
-                ("Boxplot", "PCE", "by Status"), 
-                ("Boxplot", "PCE", "by Status and Variable"),
-                ("Boxplot", "PCE", "by Direction and Variable"), 
-                ("Boxplot", "PCE", "by Cell and Variable"),
-                ("Boxplot", "PCE", "by Direction, Status and Variable"),
+                ("Boxplot", "PCE", "by Subbatch"),
+                ("Boxplot", "Voc", "by Subbatch"),
+                ("Boxplot", "Jsc", "by Subbatch"),
+                ("Boxplot", "FF", "by Subbatch"),
                 ("JV Curve", "Best device per condition", ""),
-                ("Boxplot", "all", "by Variable")  # Added
+                ("Boxplot", "all", "by Subbatch")
             ]
         }
         self.plot_callback = None
@@ -962,9 +961,7 @@ class PlotUI:
             # ADD 'all' to the beginning of the options list
             option1_dropdown.options = ['all', 'Voc', 'Jsc', 'FF', 'PCE', 'R_ser', 'R_shu', 'V_mpp', 'J_mpp', 'P_mpp']
             # Option 2 is ALWAYS the same for boxplots - this is CORRECT
-            option2_dropdown.options = ['by Batch', 'by Variable', 'by Sample', 'by Cell', 'by Scan Direction',
-                                       'by Status', 'by Status and Variable', 'by Direction and Variable', 'by Cell and Variable',
-                                       'by Direction, Status and Variable']
+            option2_dropdown.options = ['by Batch', 'by Variable', 'by Sample', 'by Cell', 'by Scan Direction', 'by Subbatch']
         elif plot_type == 'JV Curve':
             option1_dropdown.options = [
                 'All cells', 

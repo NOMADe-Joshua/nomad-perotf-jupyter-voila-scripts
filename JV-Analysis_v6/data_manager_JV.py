@@ -141,7 +141,7 @@ class DataManager:
         """Process JV data for analysis from sample IDs with Cycle support"""
         columns_jvc = ['Voc(V)', 'Jsc(mA/cm2)', 'FF(%)', 'PCE(%)', 'V_mpp(V)', 'J_mpp(mA/cm2)',
                       'P_mpp(mW/cm2)', 'R_series(Ohmcm2)', 'R_shunt(Ohmcm2)', 'sample', 'batch',
-                      'condition', 'cell', 'direction', 'ilum', 'status', 'sample_id',
+                      'condition', 'cell', 'direction', 'ilum', 'status', 'sample_id', 'subbatch',
                       'px_number', 'cycle_number']
         
         columns_cur: list[Any] = ['index', 'sample', 'batch', 'condition', 'variable', 'cell', 'direction', 
@@ -323,6 +323,11 @@ class DataManager:
                         sample_clean = file_name.split('/')[-1].split('.')[0] if '/' in file_name else file_name
                         batch_id = file_name.split("/")[1] if "/" in file_name and len(file_name.split("/")) > 1 else "unknown"
                         
+                        # Extract subbatch: string between second-to-last and last underscore in sample_id
+                        # e.g. "KIT_JoDa_20260526_VersuchmitBlei_0_D4" → subbatch = "0"
+                        sid_parts = sid.rsplit('_', 2) if sid else []
+                        subbatch = sid_parts[1] if len(sid_parts) >= 3 else ''
+                        
                         # Build JV row
                         row = [
                             c.get("open_circuit_voltage", 0),
@@ -342,6 +347,7 @@ class DataManager:
                             illum,
                             status,
                             sid,
+                            subbatch,
                             px_number,
                             cycle_number
                         ]

@@ -74,7 +74,7 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
         ]
 
     # Mapping dictionaries for plot codes
-    varx_dict = {"a": "sample", "b": "cell", "c": "direction", "d": "ilum", "e": "batch", "g": "condition", "s": "status"}
+    varx_dict = {"a": "sample", "b": "cell", "c": "direction", "d": "ilum", "e": "batch", "g": "condition", "s": "status", "k": "subbatch"}
     vary_dict = {"v": "voc", "j": "jsc", "f": "ff", "p": "pce", "u": "vmpp", "i": "jmpp", "m": "pmpp", "r": "rser", "h": "rshu"}
 
     fig_list = []
@@ -98,14 +98,14 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
 
         # Priority for grouping tokens from Option 2:
         # prefer 'g' (condition), then 'e' (batch), 'a' (sample), 'b' (cell),
-        # 'c' (direction), 's' (status), 'd' (ilum)
-        varx_priority = ['g', 'e', 'a', 'b', 'c', 's', 'd']
+        # 'c' (direction), 's' (status), 'd' (ilum), 'k' (subbatch)
+        varx_priority = ['g', 'e', 'a', 'b', 'c', 's', 'd', 'k']
 
         # Determine var_x using priority (instead of arbitrary substring match)
         var_x = None
         for key in varx_priority:
             if key in parse_code:
-                var_x = {"a": "sample", "b": "cell", "c": "direction", "d": "ilum", "e": "batch", "g": "condition", "s": "status"}[key]
+                var_x = {"a": "sample", "b": "cell", "c": "direction", "d": "ilum", "e": "batch", "g": "condition", "s": "status", "k": "subbatch"}[key]
                 break
 
         # Determine var_y normally (single-char JV param code)
@@ -229,11 +229,7 @@ def plot_list_from_voila(plot_list):
         'by Sample': 'a',
         'by Cell': 'b',
         'by Scan Direction': 'c',
-        'by Status': 's',
-        'by Status and Variable': 'sg',
-        'by Direction and Variable': 'cg',
-        'by Cell and Variable': 'bg',
-        'by Direction, Status and Variable': 'csg'
+        'by Subbatch': 'k'
     }
 
     cur_dict = {
