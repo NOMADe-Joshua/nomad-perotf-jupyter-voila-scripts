@@ -1,6 +1,6 @@
 """
 Plot Management Module
-Handles all plotting operations including JV curves, boxplots, and histograms.
+Handles all plotting operations including JV curves and boxplots.
 Extracted from main.py for better organization.
 """
 
@@ -125,14 +125,7 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
                     "data", colors=color_scheme,
                     separate_scan_dir=separate_scan_dir
                 )
-            elif "Jall" in pl and var_x:
-                fig, fig_name = plot_manager.create_combined_boxplot_grid(
-                    omitted_jv, var_x,
-                    [filtered_jv, filter_pars],
-                    "junk", colors=color_scheme,
-                    separate_scan_dir=separate_scan_dir
-                )
-            # Regular boxplots remain unchanged
+            # Regular boxplots
             elif "B" in pl and var_x and var_y:
                 fig, fig_name, wb, title_text, subtitle = plot_manager.create_boxplot(
                     filtered_jv, var_x, var_y,
@@ -140,17 +133,6 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
                     "data", colors=color_scheme,
                     separate_scan_dir=separate_scan_dir
                 )
-            elif "J" in pl and var_x and var_y:
-                fig, fig_name, wb, title_text, subtitle = plot_manager.create_boxplot(
-                    omitted_jv, var_x, var_y,
-                    [filtered_jv, filter_pars],
-                    "junk", colors=color_scheme,  # FIX: Added missing colors argument
-                    separate_scan_dir=separate_scan_dir
-                )
-            elif "H" in pl and var_y:
-                fig, fig_name = plot_manager.create_histogram(filtered_jv, var_y)
-                # Don't continue - let it fall through to append at end
-                   
             elif "Cb" in pl:
                 fig, fig_name = plot_manager.create_jv_best_per_condition_plot(filtered_jv, filtered_curves, colors=color_scheme, condition_order=condition_order)
                 fig = plot_manager.apply_jv_line_width_to_figure(fig)
@@ -271,15 +253,7 @@ def plot_list_from_voila(plot_list):
         code = ''
         plot_type, option1, option2 = plot
 
-        if "omitted" in plot_type:
-            code += "J"
-            param_code = jvc_dict.get(option1, '')
-            code += param_code
-            if param_code != 'all':
-                code += box_dict.get(option2, '')
-            else:
-                code += box_dict.get(option2, '')
-        elif "Boxplot" in plot_type:
+        if "Boxplot" in plot_type:
             code += "B"
             param_code = jvc_dict.get(option1, '')
             code += param_code
@@ -287,9 +261,6 @@ def plot_list_from_voila(plot_list):
                 code += box_dict.get(option2, '')
             else:
                 code += box_dict.get(option2, '')
-        elif "Histogram" in plot_type:
-            code += "H"
-            code += jvc_dict.get(option1, '')
         elif "JV Curve" in plot_type:
             code += cur_dict.get(option1, '')
         
@@ -345,37 +316,6 @@ class PlotManager:
                     cast(Any, trace.line).width = self.jv_line_width
 
         return fig
-
-    def create_histogram(self, data, var_y):
-        """Create a simple histogram for a JV numeric column."""
-        column_map = {
-            'voc': 'Voc(V)',
-            'jsc': 'Jsc(mA/cm2)',
-            'ff': 'FF(%)',
-            'pce': 'PCE(%)',
-            'vmpp': 'V_MPP(V)',
-            'jmpp': 'J_MPP(mA/cm2)',
-            'pmpp': 'P_MPP(mW/cm2)',
-            'rser': 'R_series(Ohmcm2)',
-            'rshu': 'R_shunt(Ohmcm2)',
-        }
-
-        column_name = column_map.get(str(var_y).lower(), str(var_y))
-        if data is None or column_name not in data.columns:
-            fig = go.Figure()
-            fig.update_layout(title=f"No data available for {column_name}")
-            return fig, f"Histogram_{column_name}.html"
-
-        series = pd.to_numeric(data[column_name], errors='coerce').dropna()
-        fig = go.Figure()
-        fig.add_trace(go.Histogram(x=series, marker_color='rgba(93, 164, 214, 0.75)'))
-        fig.update_layout(
-            title=f"Histogram of {column_name}",
-            xaxis_title=column_name,
-            yaxis_title='Count',
-            template='plotly_white',
-        )
-        return fig, f"Histogram_{column_name}.html"
 
     def create_jv_all_cells_plot(self, jvc_data, curves_data, colors=None):
         """Compatibility wrapper for the all-cells JV plot."""
@@ -628,182 +568,6 @@ class PlotManager:
         
         return matching_curves
     
-    def _create_jv_best_per_condition_plot_legacy(self, jvc_data, curves_data, colors=None):
-        """Plot JV curves for the SINGLE best measurement per condition/variable"""
-        
-        if jvc_data.empty:
-            fig = go.Figure()
-            fig.update_layout(title="No data available")
-            return fig, "JV_best_per_condition.html"
-        
-        # Check if condition column exists
-        if 'condition' not in jvc_data.columns:
-            print("Warning: No 'condition' column found. Using sample grouping instead.")
-            grouping_col = 'sample'
-        else:
-            grouping_col = 'condition'
-        
-        fig = go.Figure()
-        
-        # Calculate dynamic axis ranges based on data
-        max_voc = jvc_data['Voc(V)'].max() if 'Voc(V)' in jvc_data.columns else 1.2
-        x_max = (math.ceil(max_voc * 10) / 10) + 0.1
-        
-        # Add axis lines with dynamic range
-        fig.add_shape(type="line", x0=-0.2, y0=0, x1=x_max, y1=0, line=dict(color="gray", width=2))
-        fig.add_shape(type="line", x0=0, y0=-5, x1=0, y1=25, line=dict(color="gray", width=2))
-        
-        if colors is None:
-            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
-        
-        # CRITICAL CHANGE: Get only the SINGLE best measurement per condition (not per sample+condition)
-        # This will automatically pick the best direction (Forward or Reverse)
-        working_jvc = jvc_data.copy()
-        working_jvc['PCE(%)'] = pd.to_numeric(working_jvc['PCE(%)'], errors='coerce')
-        working_jvc = working_jvc.dropna(subset=['PCE(%)'])
-        if working_jvc.empty:
-            fig = go.Figure()
-            fig.update_layout(title="No valid PCE data available")
-            return fig, "JV_best_per_condition.html"
-
-        best_per_condition = working_jvc.loc[working_jvc.groupby(grouping_col)['PCE(%)'].idxmax()]
-        
-        # CRITICAL: Calculate legend space based on number of conditions
-        num_conditions = len(best_per_condition)
-        
-        # Calculate how many rows the legend will need (assuming 3 items per row in horizontal mode)
-        items_per_row = 3
-        num_legend_rows = (num_conditions + items_per_row - 1) // items_per_row  # Ceiling division
-        
-        # Calculate required bottom margin: base + (rows * pixels per row)
-        base_margin = 80
-        pixels_per_legend_row = 30  # Each legend row needs about 30 pixels
-        required_bottom_margin = base_margin + (num_legend_rows * pixels_per_legend_row)
-        
-        # Calculate y position for legend (further down with more items)
-        # Base position + additional offset for extra rows
-        base_y_position = -0.35
-        additional_y_offset = -0.05 * (num_legend_rows - 1)  # Push down more for each additional row
-        legend_y_position = base_y_position + additional_y_offset
-        
-        print(f"Found {num_conditions} conditions with best measurements:")
-        print(f"   Legend will use {num_legend_rows} rows")
-        print(f"   Required bottom margin: {required_bottom_margin}px")
-        print(f"   Legend y position: {legend_y_position}")
-        
-        for i, (_, best_row) in enumerate(best_per_condition.iterrows()):
-            sample = best_row['sample']
-            cell = best_row['cell']
-            condition = best_row.get(grouping_col, 'Unknown')
-            pce = best_row['PCE(%)']
-            direction = best_row['direction']
-            sample_id = best_row['sample_id']
-            ilum = best_row['ilum']
-            cycle_number = best_row.get('cycle_number', None)
-            
-            print(f"  • {condition}: {sample}_{cell} ({direction}, PCE: {pce:.2f}%)")
-            
-            device_mask = (
-                (curves_data['sample_id'] == sample_id) & 
-                (curves_data['cell'] == cell) &
-                (curves_data['direction'] == direction) &
-                (curves_data['ilum'] == ilum)
-            )
-            if 'cycle_number' in curves_data.columns and pd.notna(cycle_number):
-                device_mask = device_mask & (curves_data['cycle_number'] == cycle_number)
-
-            device_curves = curves_data[device_mask]
-            
-            if device_curves.empty:
-                print(f"    Warning: No curves found for {condition}")
-                continue
-            
-            # Process voltage and current measurements
-            voltage_measurements = {}
-            current_measurements = {}
-            
-            for _, curve_row in device_curves.iterrows():
-                curve_direction = curve_row['direction']
-                variable_type = curve_row['variable']
-                
-                # Extract data values
-                data_values = []
-                for col in curve_row.index[8:]:
-                    try:
-                        val = float(curve_row[col])
-                        if not pd.isna(val):
-                            data_values.append(val)
-                    except (ValueError, TypeError):
-                        continue
-                
-                key = f"{curve_direction}"
-                
-                if variable_type == "Voltage (V)":
-                    voltage_measurements[key] = data_values
-                elif variable_type == "Current Density(mA/cm2)":
-                    current_measurements[key] = data_values
-            
-            # Plot curves for this measurement
-            base_color = colors[i % len(colors)]
-            r, g, b, alpha = self._extract_rgb_from_color(base_color)
-            
-            for key in voltage_measurements.keys():
-                if key in current_measurements:
-                    voltage_values = voltage_measurements[key]
-                    current_values = current_measurements[key]
-                    curve_direction = key
-                    
-                    if len(voltage_values) > 0 and len(current_values) > 0:
-                        voltage_values, current_values = self._mask_boundary_zero_point(voltage_values, current_values)
-                        if len(voltage_values) == 0 or len(current_values) == 0:
-                            continue
-
-                        line_color = base_color
-                        line_style = 'solid'
-                        marker_symbol = 'circle'
-                        
-                        trace_name = f"{condition} ({curve_direction}, {pce:.1f}%)"
-                        
-                        fig.add_trace(go.Scatter(
-                            x=voltage_values,
-                            y=current_values,
-                            mode='lines+markers',
-                            line=dict(dash=line_style, color=line_color, width=2),
-                            marker=dict(size=5, color=line_color, symbol=marker_symbol),
-                            name=trace_name,
-                            legendgroup=f"condition_{i}",
-                            showlegend=True
-                        ))
-        
-        # Update layout with DRAGGABLE legend
-        fig.update_layout(
-            title=f"JV Curves - Best Measurement per {grouping_col.title()}",
-            xaxis_title='Voltage [V]',
-            yaxis_title='Current Density [mA/cm²]',
-            xaxis=dict(range=[-0.2, x_max]),
-            yaxis=dict(range=[-5, 25]),
-            template="plotly_white",
-            legend=dict(
-                x=0.02,  # Start position left inside plot
-                y=0.98,  # Start position top
-                xanchor="left",
-                yanchor="top",
-                bgcolor="rgba(255,255,255,0.85)",  # Semi-transparent background
-                bordercolor="black",
-                borderwidth=1,
-                font=dict(size=10)  # Slightly smaller font to save space
-            ),
-            showlegend=True,
-            margin=dict(l=80, r=50, t=80, b=80),  # Normal margins
-            width=1600,  # 16:10 ratio width
-            height=1000,  # 16:10 ratio height
-        )
-        
-        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
-        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
-        
-        return fig, "JV_best_per_condition.html"
-
     def create_jv_best_device_plot(self, jvc_data, curves_data, colors=None):
         """Plot JV curves for the best device (highest PCE) with all available measurements"""
         
@@ -1328,232 +1092,6 @@ class PlotManager:
 
         return 'Unknown', 'Unknown'
 
-    def _apply_log_current_transform(self, fig):
-        """Apply ln(|J|) transform to all JV traces."""
-        if fig is None:
-            return fig
-
-        for trace in fig.data:
-            if getattr(trace, 'type', None) != 'scatter':
-                continue
-
-            try:
-                x_values = np.asarray(trace.x, dtype=float)
-                y_values = np.asarray(trace.y, dtype=float)
-            except Exception:
-                continue
-
-            if x_values.size == 0 or y_values.size == 0:
-                continue
-
-            valid_mask = np.isfinite(x_values) & np.isfinite(y_values) & (np.abs(y_values) > 0)
-            if not np.any(valid_mask):
-                trace.x = []
-                trace.y = []
-                continue
-
-            trace.x = x_values[valid_mask].tolist()
-            trace.y = np.log(np.abs(y_values[valid_mask])).tolist()
-
-        # Keep only vertical helper lines (x=0); remove horizontal J=0 line for log-space.
-        existing_shapes = list(getattr(fig.layout, 'shapes', []) or [])
-        vertical_shapes = []
-        for shape in existing_shapes:
-            try:
-                if shape.x0 == shape.x1:
-                    vertical_shapes.append(shape)
-            except Exception:
-                continue
-
-        fig.update_layout(shapes=vertical_shapes)
-        fig.update_yaxes(title='ln(|Current Density|) [ln(mA/cm²)]')
-        return fig
-
-    def create_jv_all_filtered_curves_plot(self, jvc_data, curves_data, colors=None):
-        """Plot all filtered JV curves in one figure."""
-        if jvc_data is None or jvc_data.empty or curves_data is None or curves_data.empty:
-            fig = go.Figure()
-            fig.update_layout(title="No data available")
-            return fig, "JV_all_filtered_curves.html"
-
-        working_jv = jvc_data.copy()
-        if colors is None:
-            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
-
-        condition_col = 'condition' if 'condition' in working_jv.columns else 'sample'
-        condition_values = working_jv[condition_col].fillna('Unknown').astype(str).unique().tolist()
-        color_list = self._get_intelligent_colors(condition_values, len(condition_values), color_scheme=colors)
-        condition_color_map = {cond: color_list[idx] for idx, cond in enumerate(condition_values)}
-
-        # Build metadata map from JV table.
-        metadata_by_key = {}
-        for _, row in working_jv.iterrows():
-            key = self._build_measurement_key(row)
-            condition_value = str(row.get(condition_col, 'Unknown'))
-            metadata_by_key[key] = {
-                'condition': condition_value,
-                'sample': row.get('sample', 'Unknown'),
-                'cell': row.get('cell', 'Unknown'),
-                'direction': row.get('direction', 'Unknown'),
-                'px_number': row.get('px_number', None),
-                'cycle_number': row.get('cycle_number', None),
-                'pce': row.get('PCE(%)', None),
-            }
-
-        # Build curve map keyed by measurement.
-        curves_by_key = {}
-        for _, curve_row in curves_data.iterrows():
-            key = self._build_measurement_key(curve_row)
-            variable_type = str(curve_row.get('variable', ''))
-            data_values = self._extract_curve_data_values(curve_row)
-            if not data_values:
-                continue
-
-            if key not in curves_by_key:
-                curves_by_key[key] = {'voltage': [], 'current': []}
-
-            if variable_type == "Voltage (V)":
-                curves_by_key[key]['voltage'].append(data_values)
-            elif variable_type == "Current Density(mA/cm2)":
-                curves_by_key[key]['current'].append(data_values)
-
-        fig = go.Figure()
-        legend_conditions_seen = set()
-        all_current_values = []
-        max_voc = working_jv['Voc(V)'].max() if 'Voc(V)' in working_jv.columns else 1.2
-        x_max = (math.ceil(max_voc * 10) / 10) + 0.1
-
-        for key, metadata in metadata_by_key.items():
-            curve_entry = curves_by_key.get(key)
-            if curve_entry is None:
-                continue
-
-            voltage_sets = curve_entry.get('voltage', [])
-            current_sets = curve_entry.get('current', [])
-            pair_count = min(len(voltage_sets), len(current_sets))
-            if pair_count == 0:
-                continue
-
-            condition_value = metadata['condition']
-            base_color = condition_color_map.get(condition_value, colors[0])
-
-            for idx in range(pair_count):
-                voltage_values = voltage_sets[idx]
-                current_values = current_sets[idx]
-                voltage_values, current_values = self._mask_boundary_zero_point(voltage_values, current_values)
-                if len(voltage_values) == 0 or len(current_values) == 0:
-                    continue
-
-                all_current_values.extend(current_values)
-
-                px = metadata.get('px_number')
-                cycle = metadata.get('cycle_number')
-                pce = metadata.get('pce')
-                sample = metadata.get('sample')
-                cell = metadata.get('cell')
-                direction = metadata.get('direction')
-
-                customdata = [[
-                    condition_value,
-                    sample,
-                    cell,
-                    direction,
-                    str(px) if px is not None else '-',
-                    str(int(cycle)) if cycle is not None and not pd.isna(cycle) else '-',
-                    float(pce) if pce is not None and not pd.isna(pce) else float('nan')
-                ]] * len(voltage_values)
-
-                showlegend = condition_value not in legend_conditions_seen
-                if showlegend:
-                    legend_conditions_seen.add(condition_value)
-
-                fig.add_trace(go.Scatter(
-                    x=voltage_values,
-                    y=current_values,
-                    mode='lines',
-                    line=dict(color=base_color, width=2),
-                    name=condition_value,
-                    legendgroup=condition_value,
-                    showlegend=showlegend,
-                    customdata=customdata,
-                    hovertemplate=(
-                        '<b>%{customdata[0]}</b><br>'
-                        'Sample: %{customdata[1]}<br>'
-                        'Cell: %{customdata[2]}<br>'
-                        'Direction: %{customdata[3]}<br>'
-                        'Pixel: %{customdata[4]}<br>'
-                        'Cycle: %{customdata[5]}<br>'
-                        'PCE: %{customdata[6]:.2f}%<br>'
-                        'Voltage: %{x:.3f} V<br>'
-                        'Current: %{y:.3f} mA/cm²<br>'
-                        '<extra></extra>'
-                    )
-                ))
-
-        if not all_current_values:
-            fig.update_layout(title="No matching JV curve traces available")
-            return fig, "JV_all_filtered_curves.html"
-
-        y_min = min(all_current_values)
-        y_max = max(all_current_values)
-        y_span = max(1.0, y_max - y_min)
-        y_pad = 0.08 * y_span
-
-        fig.add_shape(
-            type="line",
-            x0=-0.2,
-            y0=0,
-            x1=x_max,
-            y1=0,
-            line=dict(color="gray", width=2)
-        )
-        fig.add_shape(
-            type="line",
-            x0=0,
-            y0=y_min - y_pad,
-            x1=0,
-            y1=y_max + y_pad,
-            line=dict(color="gray", width=2)
-        )
-
-        fig.update_layout(
-            title=dict(text="JV Curves - All Filtered Measurements", font=dict(size=self.font_size_title)),
-            xaxis_title='Voltage [V]',
-            yaxis_title='Current Density [mA/cm²]',
-            xaxis=dict(range=[-0.2, x_max], titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
-            yaxis=dict(titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
-            template="plotly_white",
-            legend=dict(
-                x=0.02,
-                y=0.98,
-                xanchor="left",
-                yanchor="top",
-                bgcolor="rgba(255,255,255,0.85)",
-                bordercolor="black",
-                borderwidth=1,
-                font=dict(size=self.font_size_legend)
-            ),
-            showlegend=True,
-            margin=dict(l=80, r=50, t=80, b=80),
-            width=1600,
-            height=1000
-        )
-        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
-        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
-        return fig, "JV_all_filtered_curves.html"
-
-    def create_jv_curve_analysis_plot(self, jvc_data, curves_data, mode='best_per_condition', log_current=False, colors=None):
-        """Create JV curve analysis plot for selected mode and axis scaling."""
-        if mode == 'all_filtered':
-            fig, fig_name = self.create_jv_all_filtered_curves_plot(jvc_data, curves_data, colors=colors)
-        else:
-            fig, fig_name = self.create_jv_best_per_condition_plot(jvc_data, curves_data, colors=colors)
-
-        fig = self.apply_jv_line_width_to_figure(fig)
-        if log_current:
-            fig = self._apply_log_current_transform(fig)
-        return fig, fig_name
-    
     def create_jv_separated_by_cell_plot(self, jvc_data, curves_data, colors=None, plot_type="all"):
         """Create separate plots for each sample, showing all cells together"""
         
