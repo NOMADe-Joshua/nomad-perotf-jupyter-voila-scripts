@@ -881,6 +881,8 @@ class PlotUI:
         self.plot_callback = None
         self.reorder_update_callback = None  # Callback to notify when reorder changes
         self.variable_order_state = None
+        self.variable_disabled_state = None
+        self.variable_disabled_list = []
         self._create_widgets()
         self._setup_observers()
         self._load_preset()
@@ -1039,6 +1041,14 @@ class PlotUI:
         )
         self.variable_order_state.add_class('reorder-order-state')
         self.variable_order_state.observe(self._on_variable_order_state_change, names='value')
+
+        self.variable_disabled_list = []
+        self.variable_disabled_state = widgets.Text(
+            value='[]',
+            layout=widgets.Layout(display='none')
+        )
+        self.variable_disabled_state.add_class('reorder-disabled-state')
+        self.variable_disabled_state.observe(self._on_variable_disabled_state_change, names='value')
     
     def update_variable_reorder(self, available_variables):
         """Update variable reorder section with available variables"""
@@ -1050,9 +1060,12 @@ class PlotUI:
             return
         
         self.variable_order_list = list(available_variables)
+        self.variable_disabled_list = []
         debug_logger.add('REORDER', f"Saved variable_order_list: {self.variable_order_list}")
         if self.variable_order_state is not None:
             self.variable_order_state.value = json.dumps(self.variable_order_list)
+        if self.variable_disabled_state is not None:
+            self.variable_disabled_state.value = '[]'
         
         self.variable_move_up_buttons = []
         self.variable_move_down_buttons = []
@@ -1069,10 +1082,15 @@ class PlotUI:
                 batch_name = "Unknown"
                 variation_name = str(var)
             
-            # Create HTML row with drag-and-drop (no buttons - drag-and-drop only)
+            # Create HTML row with drag-and-drop and enable/disable checkbox
             row_html = f"""
             <tr class="reorder-row" draggable="true" data-index="{i}" data-value="{var}">
                 <td style="text-align: center; color: #999; cursor: grab;"><span class="reorder-drag-handle">≡</span></td>
+                <td style="text-align: center; padding: 0 6px;">
+                    <input type="checkbox" class="reorder-enable-checkbox" checked
+                           style="width:15px; height:15px; cursor:pointer; accent-color:#667eea;"
+                           title="Include this variation in plots">
+                </td>
                 <td style="text-align: center; font-weight:600; color:#667eea; font-size:16px;">
                     <span class="reorder-number">{i+1}</span>
                 </td>
@@ -1132,6 +1150,7 @@ class PlotUI:
                 <thead>
                     <tr style="background-color: #f9f9f9; border-bottom: 2px solid #ddd;">
                         <th style="width: 30px; text-align: center;">≡</th>
+                        <th style="width: 30px; text-align: center;" title="Include in plots">✓</th>
                         <th style="width: 60px; text-align: center;">#</th>
                         <th>Variation</th>
                     </tr>
@@ -1141,6 +1160,7 @@ class PlotUI:
                 </tbody>
             </table>
             <input type="hidden" id="reorder_hidden_order" value="{json.dumps(list(available_variables))}">
+            <input type="hidden" id="reorder_hidden_disabled" value="[]">
         </div>
         """
         
@@ -1155,11 +1175,11 @@ class PlotUI:
         
         instructions = widgets.HTML(
             "<div style='font-size: 12px; color: #666; margin-bottom: 15px; background: #f0f7ff; padding: 10px; border-left: 4px solid #667eea; border-radius: 4px;'>"
-            "<b>💡 Instructions:</b> Drag the ≡ handle to reorder variations. The new order will be applied when you click <b>Plot Selection</b>.</div>"
+            "<b>💡 Instructions:</b> Drag the ≡ handle to reorder variations. Use the ✓ checkbox to include/exclude individual variations from all plots. Changes apply when you click <b>Plot Selection</b>.</div>"
         )
         
         # Create container with all components (no Apply button - use Plot Selection instead)
-        all_widgets = [title, instructions, table_widget, self.variable_order_state]
+        all_widgets = [title, instructions, table_widget, self.variable_order_state, self.variable_disabled_state]
         
         self.variable_reorder_section.children = all_widgets
         self.variable_reorder_section.layout = widgets.Layout(
@@ -1241,8 +1261,24 @@ class PlotUI:
                             console.log('[DND] Dropped at new position');
                             updateNumbersAfterDrag();
                             sendReorderToCommHandler();
+                            if (typeof window.syncDisabledStateToWidget === 'function') {
+                                window.syncDisabledStateToWidget();
+                            }
                         }
                     });
+                });
+                
+                // Add checkbox enable/disable listeners
+                rows.forEach((row) => {
+                    const cb = row.querySelector('.reorder-enable-checkbox');
+                    if (cb) {
+                        cb.addEventListener('change', function() {
+                            row.style.opacity = this.checked ? '1.0' : '0.35';
+                            if (typeof window.syncDisabledStateToWidget === 'function') {
+                                window.syncDisabledStateToWidget();
+                            }
+                        });
+                    }
                 });
                 
                 window.updateNumbersAfterDrag = function() {
@@ -1296,8 +1332,35 @@ class PlotUI:
                     console.log('[DND-SYNC] Synced order to widget-state only (action=' + commAction + ')');
                 };
 
+                window.syncDisabledStateToWidget = function() {
+                    const allRows = tbody.querySelectorAll('tr.reorder-row');
+                    const disabledValues = [];
+                    allRows.forEach((row) => {
+                        const cb = row.querySelector('.reorder-enable-checkbox');
+                        if (cb && !cb.checked) {
+                            const value = row.getAttribute('data-value');
+                            if (value) disabledValues.push(value);
+                        }
+                    });
+                    try {
+                        const serialized = JSON.stringify(disabledValues);
+                        const disabledInput = document.querySelector('.reorder-disabled-state input, .reorder-disabled-state textarea');
+                        if (disabledInput) {
+                            disabledInput.value = serialized;
+                            disabledInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            disabledInput.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                        const hiddenDisabled = document.querySelector('#reorder_hidden_disabled');
+                        if (hiddenDisabled) { hiddenDisabled.value = serialized; }
+                        console.log('[DND-DISABLED] Synced disabled state:', disabledValues);
+                    } catch(err) {
+                        console.log('[DND-DISABLED] Error syncing disabled state:', err);
+                    }
+                };
+
                 // Initialize hidden state with current DOM order
                 window.sendReorderToCommHandler('sync_order');
+                window.syncDisabledStateToWidget();
                 
             }, 100);
         })();
@@ -1505,7 +1568,36 @@ class PlotUI:
             import traceback
             debug_logger.add('PLOT', f"[GET_ORDER] Traceback: {traceback.format_exc()}")
             return self.variable_order_list if hasattr(self, 'variable_order_list') else []
-    
+
+    def _on_variable_disabled_state_change(self, change):
+        """Update Python-side disabled list when hidden state widget changes from JS."""
+        try:
+            if change.get('name') != 'value':
+                return
+            raw = change.get('new', '')
+            if not raw:
+                return
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                self.variable_disabled_list = [str(v) for v in parsed]
+                debug_logger.add('REORDER', f"[DISABLED] variable_disabled_list updated: {self.variable_disabled_list}")
+        except Exception as e:
+            debug_logger.add('REORDER', f"[DISABLED] Failed to parse disabled state: {e}")
+
+    def get_disabled_variables(self):
+        """Get list of currently disabled (excluded) variable identifiers."""
+        try:
+            if self.variable_disabled_state is not None and self.variable_disabled_state.value:
+                try:
+                    parsed = json.loads(self.variable_disabled_state.value)
+                    if isinstance(parsed, list):
+                        self.variable_disabled_list = [str(v) for v in parsed]
+                except Exception:
+                    pass
+            return list(self.variable_disabled_list) if hasattr(self, 'variable_disabled_list') else []
+        except Exception:
+            return []
+
     def get_plot_selections(self):
         """Get current plot selections"""
         selections = []

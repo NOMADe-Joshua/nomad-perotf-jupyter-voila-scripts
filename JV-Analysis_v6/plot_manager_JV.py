@@ -36,7 +36,7 @@ def _flatten_multiindex_columns(self, df):
         df.columns = ['_'.join(col).strip() for col in df.columns.values]
     return df
 
-def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=None, separate_scan_dir=False, font_size_axis=None, font_size_title=None, font_size_legend=None, jv_line_width=None):
+def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=None, separate_scan_dir=False, font_size_axis=None, font_size_title=None, font_size_legend=None, jv_line_width=None, condition_order=None):
     """
     Main plotting function that processes plot codes and creates figures.
     
@@ -152,7 +152,7 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
                 # Don't continue - let it fall through to append at end
                    
             elif "Cb" in pl:
-                fig, fig_name = plot_manager.create_jv_best_per_condition_plot(filtered_jv, filtered_curves, colors=color_scheme)
+                fig, fig_name = plot_manager.create_jv_best_per_condition_plot(filtered_jv, filtered_curves, colors=color_scheme, condition_order=condition_order)
                 fig = plot_manager.apply_jv_line_width_to_figure(fig)
             elif "Cw" in pl:
                 fig, fig_name = plot_manager.create_jv_best_device_plot(filtered_jv, filtered_curves, colors=color_scheme)
@@ -1029,7 +1029,7 @@ class PlotManager:
         sample_name = f"JV_best_device_{best_sample} (Cell {best_cell}).html"
         return fig, sample_name
 
-    def create_jv_best_per_condition_plot(self, jvc_data, curves_data, colors=None):
+    def create_jv_best_per_condition_plot(self, jvc_data, curves_data, colors=None, condition_order=None):
         """Plot JV curves for the SINGLE best measurement per condition/variable"""
         
         if jvc_data.empty:
@@ -1060,6 +1060,20 @@ class PlotManager:
         # CRITICAL CHANGE: Get only the SINGLE best measurement per condition (not per sample+condition)
         # This will automatically pick the best direction (Forward or Reverse)
         best_per_condition = jvc_data.loc[jvc_data.groupby(grouping_col)['PCE(%)'].idxmax()]
+        
+        # Apply condition_order so color assignment matches boxplot order
+        if condition_order:
+            present_conditions = set(best_per_condition[grouping_col].unique())
+            ordered = [c for c in condition_order if c in present_conditions]
+            # Append any conditions not covered by condition_order (safety)
+            for c in best_per_condition[grouping_col].unique():
+                if c not in set(ordered):
+                    ordered.append(c)
+            if ordered:
+                cat_type = pd.CategoricalDtype(categories=ordered, ordered=True)
+                best_per_condition = best_per_condition.copy()
+                best_per_condition[grouping_col] = best_per_condition[grouping_col].astype(cat_type)
+                best_per_condition = best_per_condition.sort_values(grouping_col)
         
         # CRITICAL: Calculate legend space based on number of conditions
         num_conditions = len(best_per_condition)

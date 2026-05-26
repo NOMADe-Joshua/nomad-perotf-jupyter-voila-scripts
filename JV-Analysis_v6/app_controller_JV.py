@@ -855,8 +855,15 @@ If you tested specific variables or conditions for each sample, please write the
                         debug_logger.add('PLOT', f"filtered_df shape: {filtered_df.shape}")
                         
                         if 'identifier' in filtered_df.columns:
-                            available_vars = list(filtered_df['identifier'].unique())
-                            debug_logger.add('PLOT', f"Using 'identifier' column, found {len(available_vars)} unique values")
+                            # Preserve the original upload order (same as "Add Variable Names" page)
+                            original_order = list(self.data_manager.get_unique_values())
+                            present_ids = set(filtered_df['identifier'].unique())
+                            available_vars = [v for v in original_order if v in present_ids]
+                            # Safety: add any identifiers present in filtered data but missing from unique_vals
+                            for v in filtered_df['identifier'].unique():
+                                if v not in present_ids or v not in set(available_vars):
+                                    available_vars.append(v)
+                            debug_logger.add('PLOT', f"Using 'identifier' column (upload order preserved), found {len(available_vars)} unique values")
                         elif 'condition' in filtered_df.columns:
                             available_vars = list(filtered_df['condition'].unique())
                             debug_logger.add('PLOT', f"Using 'condition' column, found {len(available_vars)} unique values")
@@ -1011,7 +1018,26 @@ If you tested specific variables or conditions for each sample, please write the
             
             # Update debug display after ordering logic
             self._update_debug_display()
-            
+
+            # Exclude disabled variations (unchecked in the reorder widget)
+            disabled_vars = self.plot_ui.get_disabled_variables()
+            if disabled_vars:
+                disabled_set = set(disabled_vars)
+                debug_logger.add('PLOT', f"[DISABLED] Excluding {len(disabled_set)} disabled variations: {sorted(disabled_set)}")
+                if filtered_jv is not None and 'identifier' in filtered_jv.columns:
+                    disabled_sample_ids = set()
+                    if 'sample_id' in filtered_jv.columns:
+                        disabled_sample_ids = set(
+                            filtered_jv.loc[filtered_jv['identifier'].isin(disabled_set), 'sample_id']
+                        )
+                    filtered_jv = filtered_jv[~filtered_jv['identifier'].isin(disabled_set)].copy()
+                    debug_logger.add('PLOT', f"[DISABLED] filtered_jv rows after exclusion: {len(filtered_jv)}")
+                    if filtered_curves is not None and not filtered_curves.empty and disabled_sample_ids and 'sample_id' in filtered_curves.columns:
+                        filtered_curves = filtered_curves[~filtered_curves['sample_id'].isin(disabled_sample_ids)].copy()
+                if variable_order:
+                    variable_order = [v for v in variable_order if v not in disabled_set]
+                    debug_logger.add('PLOT', f"[DISABLED] variable_order after exclusion: {variable_order}")
+
             # Prepare support data tuple
             omitted_jv = data.get('junk', pd.DataFrame())
             filter_parameters = self.data_manager.get_filter_parameters()
@@ -1028,6 +1054,14 @@ If you tested specific variables or conditions for each sample, please write the
             # Get font size settings
             font_size_settings = self.font_size_ui.get_font_sizes()
             
+            # Derive condition order from the already-sorted filtered_jv so that
+            # boxplot color assignments (by position in data) and JV curve color
+            # assignments stay in sync.
+            condition_order = None
+            if filtered_jv is not None and 'condition' in filtered_jv.columns:
+                condition_order = list(filtered_jv['condition'].unique())
+                debug_logger.add('PLOT', f"[COLOR] condition_order for JV curves: {condition_order}")
+
             # Create plots using the plot manager
             figs, names = plotting_string_action(
                 plot_selections, 
@@ -1036,6 +1070,7 @@ If you tested specific variables or conditions for each sample, please write the
                 is_voila=True,
                 color_scheme=selected_colors,
                 separate_scan_dir=separate_scan_dir,
+                condition_order=condition_order,
                 **font_size_settings  # Pass font size parameters
             )
             
