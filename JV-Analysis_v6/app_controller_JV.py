@@ -1353,7 +1353,8 @@ If you tested specific variables or conditions for each sample, please write the
                     [fig_name],
                     titles=[title],
                     subtitles=[subtitle],
-                    container_widget=self.jv_curve_analysis_ui.plotted_content
+                    container_widget=self.jv_curve_analysis_ui.plotted_content,
+                    jv_legend_table=True
                 )
 
         except Exception as e:

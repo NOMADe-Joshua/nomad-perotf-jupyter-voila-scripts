@@ -446,7 +446,7 @@ class ResizablePlotManager:
     """Enhanced plot manager that creates resizable plots"""
     
     @staticmethod
-    def display_plots_resizable(figs, names, titles=None, subtitles=None, container_widget=None):  # ADD titles and subtitles
+    def display_plots_resizable(figs, names, titles=None, subtitles=None, container_widget=None, jv_legend_table=False):
         """
         Display multiple plots as resizable widgets.
         
@@ -456,12 +456,14 @@ class ResizablePlotManager:
             titles: Optional list of display titles (if None, uses names)
             subtitles: Optional list of subtitles
             container_widget: Optional widget container for output
+            jv_legend_table: If True, hide in-figure legend for JV curve plots
+                             and display it as a table below the plot instead
         """
         if container_widget:
             with container_widget:
-                ResizablePlotManager._display_plots_internal(figs, names, titles, subtitles)
+                ResizablePlotManager._display_plots_internal(figs, names, titles, subtitles, jv_legend_table)
         else:
-            ResizablePlotManager._display_plots_internal(figs, names, titles, subtitles)
+            ResizablePlotManager._display_plots_internal(figs, names, titles, subtitles, jv_legend_table)
     @staticmethod
     def _build_jv_legend_table(fig):
         """Extract trace names/colors from a JV figure and return an HTML legend table."""
@@ -508,7 +510,7 @@ class ResizablePlotManager:
         )
 
     @staticmethod
-    def _display_plots_internal(figs, names, titles=None, subtitles=None):  # ADD parameters
+    def _display_plots_internal(figs, names, titles=None, subtitles=None, jv_legend_table=False):
         """Internal method to display plots"""
         from IPython.display import clear_output
         clear_output(wait=True)
@@ -525,8 +527,8 @@ class ResizablePlotManager:
 
                 is_jv_curve = name.lower().startswith("jv_")
 
-                # For JV curve plots: hide the in-figure legend (will be shown as table below)
-                if is_jv_curve:
+                # For JV Curve Analysis tab: hide in-figure legend and show as table below
+                if is_jv_curve and jv_legend_table:
                     fig.update_layout(showlegend=False)
 
                 # Determine appropriate size based on plot type
@@ -540,8 +542,8 @@ class ResizablePlotManager:
                 # Create and display resizable plot WITH TITLE, SUBTITLE AND FILENAME
                 display_resizable_plot(fig, display_title, width, height, subtitle, filename=name)
 
-                # For JV curve plots: display legend as a table below the plot
-                if is_jv_curve:
+                # For JV Curve Analysis tab: display legend as a table below the plot
+                if is_jv_curve and jv_legend_table:
                     legend_html = ResizablePlotManager._build_jv_legend_table(fig)
                     if legend_html:
                         display(HTML(legend_html))
