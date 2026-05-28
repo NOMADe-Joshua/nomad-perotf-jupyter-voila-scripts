@@ -92,7 +92,7 @@ def find_matching_pairs(files_dict: Dict[str, bytes]) -> List[Tuple[str, str, st
 
 
 def merge_uvvis_files(transmission_content: str, reflection_content: str, 
-                      filename_trans: str, filename_refl: str) -> Optional[str]:
+                      filename_trans: str, filename_refl: str) -> str:
     """
     Merge transmission and reflection UV-Vis data files.
     
@@ -159,17 +159,20 @@ def merge_uvvis_files(transmission_content: str, reflection_content: str,
         return df_merged.to_csv(index=False, sep=";")
     
     except Exception as e:
-        raise Exception(f"Error merging files: {str(e)}")
+        raise RuntimeError(f"Error merging files: {str(e)}") from e
 
 
 def process_uvvis_files(transmission_files: Dict[str, bytes], 
-                        reflection_files: Dict[str, bytes]) -> Tuple[bytes, int, List[str]]:
+                        reflection_files: Dict[str, bytes],
+                        pairs: Optional[Dict[str, str]] = None) -> Tuple[bytes, int, List[str]]:
     """
     Process UV-Vis transmission and reflection files and create merged output.
     
     Args:
         transmission_files: Dict of transmission files {filename: content}
         reflection_files: Dict of reflection files {filename: content}
+        pairs: Optional pre-computed mapping {trans_filename: refl_filename}.
+               When provided, used directly instead of filename-based matching.
     
     Returns:
         Tuple of (zip_content, number_processed, error_list)
@@ -182,27 +185,30 @@ def process_uvvis_files(transmission_files: Dict[str, bytes],
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         # Find matching pairs
         for trans_file, trans_content in transmission_files.items():
-            # Find matching reflection file
-            base_no_ext = os.path.splitext(trans_file)[0]
-            ext = os.path.splitext(trans_file)[1]
-            
-            # Generate reflection filename candidates
-            candidates = []
-            if base_no_ext.endswith('_T'):
-                candidates = [f"{base_no_ext[:-1]}R{ext}", f"{base_no_ext[:-1]}r{ext}"]
-            elif base_no_ext.endswith('_t'):
-                candidates = [f"{base_no_ext[:-1]}R{ext}", f"{base_no_ext[:-1]}r{ext}"]
-            elif base_no_ext.endswith('T'):
-                candidates = [f"{base_no_ext[:-1]}R{ext}", f"{base_no_ext[:-1]}r{ext}"]
-            elif base_no_ext.endswith('t'):
-                candidates = [f"{base_no_ext[:-1]}R{ext}", f"{base_no_ext[:-1]}r{ext}"]
-            
-            # Find the matching reflection file
-            refl_file = None
-            for candidate in candidates:
-                if candidate in reflection_files:
-                    refl_file = candidate
-                    break
+            # Use pre-computed pairs if provided, otherwise fall back to filename matching
+            if pairs is not None:
+                refl_file = pairs.get(trans_file)
+            else:
+                # Find matching reflection file by filename pattern
+                base_no_ext = os.path.splitext(trans_file)[0]
+                ext = os.path.splitext(trans_file)[1]
+                
+                # Generate reflection filename candidates
+                candidates = []
+                if base_no_ext.endswith('_T'):
+                    candidates = [f"{base_no_ext[:-1]}R{ext}", f"{base_no_ext[:-1]}r{ext}"]
+                elif base_no_ext.endswith('_t'):
+                    candidates = [f"{base_no_ext[:-1]}R{ext}", f"{base_no_ext[:-1]}r{ext}"]
+                elif base_no_ext.endswith('T'):
+                    candidates = [f"{base_no_ext[:-1]}R{ext}", f"{base_no_ext[:-1]}r{ext}"]
+                elif base_no_ext.endswith('t'):
+                    candidates = [f"{base_no_ext[:-1]}R{ext}", f"{base_no_ext[:-1]}r{ext}"]
+                
+                refl_file = None
+                for candidate in candidates:
+                    if candidate in reflection_files:
+                        refl_file = candidate
+                        break
             
             if refl_file is None:
                 errors.append(f"No matching reflection file for {trans_file}")
