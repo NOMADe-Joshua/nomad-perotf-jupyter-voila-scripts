@@ -1,4 +1,4 @@
-"""
+﻿"""
 GUI Components Module (Shared)
 Contains reusable UI components - copied from JV-Analysis.
 """
@@ -69,7 +69,7 @@ class AuthenticationUI:
         self.auth_action_box = widgets.VBox([self.auth_button, self.auth_status_label])
         
         self.settings_toggle_button = widgets.Button(
-            description='▼ Connection Settings',
+            description='Ôû╝ Connection Settings',
             layout=widgets.Layout(width='200px')
         )
         
@@ -146,15 +146,15 @@ class AuthenticationUI:
         """Toggle settings visibility"""
         if self.settings_content.layout.display == 'none':
             self.settings_content.layout.display = 'flex'
-            self.settings_toggle_button.description = '▼ Connection Settings'
+            self.settings_toggle_button.description = 'Ôû╝ Connection Settings'
         else:
             self.settings_content.layout.display = 'none'
-            self.settings_toggle_button.description = '▶ Connection Settings'
+            self.settings_toggle_button.description = 'ÔûÂ Connection Settings'
     
     def close_settings(self):
         """Close settings panel"""
         self.settings_content.layout.display = 'none'
-        self.settings_toggle_button.description = '▶ Connection Settings'
+        self.settings_toggle_button.description = 'ÔûÂ Connection Settings'
     
     def set_success_callback(self, callback):
         """Set callback to execute on successful authentication"""

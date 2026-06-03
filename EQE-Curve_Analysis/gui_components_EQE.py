@@ -1,4 +1,4 @@
-"""
+﻿"""
 Minimal GUI components for the EQE dashboard.
 """
 
@@ -55,7 +55,7 @@ class AuthenticationUI:
         self.token_auth_box = widgets.VBox([self.token_input])
         self.token_auth_box.layout.display = "none"
 
-        self.settings_toggle_button = widgets.Button(description="▼ Connection Settings", layout=widgets.Layout(width="200px"))
+        self.settings_toggle_button = widgets.Button(description="Ôû╝ Connection Settings", layout=widgets.Layout(width="200px"))
         self.settings_content = widgets.VBox(
             [
                 widgets.HTML("<p><strong>Oasis API:</strong> http://elnserver.lti.kit.edu/nomad-oasis/api/v1</p>"),
@@ -126,17 +126,17 @@ class AuthenticationUI:
     def _toggle_settings(self, _b):
         if self.settings_content.layout.display == "none":
             self.settings_content.layout.display = "flex"
-            self.settings_toggle_button.description = "▼ Connection Settings"
+            self.settings_toggle_button.description = "Ôû╝ Connection Settings"
         else:
             self.settings_content.layout.display = "none"
-            self.settings_toggle_button.description = "▶ Connection Settings"
+            self.settings_toggle_button.description = "ÔûÂ Connection Settings"
 
     def set_success_callback(self, callback):
         self.success_callback = callback
 
     def close_settings(self):
         self.settings_content.layout.display = "none"
-        self.settings_toggle_button.description = "▶ Connection Settings"
+        self.settings_toggle_button.description = "ÔûÂ Connection Settings"
 
     def get_widget(self):
         return self.settings_box

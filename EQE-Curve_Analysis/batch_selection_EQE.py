@@ -3,10 +3,24 @@ Batch selector widget for EQE app.
 """
 
 import re
+import importlib.util
+import os
 
 import ipywidgets as widgets
 
-from api_calls import get_batch_ids
+
+def _load_local_get_batch_ids():
+    workspace_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    api_calls_path = os.path.join(workspace_root, "api_calls.py")
+    spec = importlib.util.spec_from_file_location("workspace_api_calls", api_calls_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load local api_calls module at {api_calls_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.get_batch_ids
+
+
+get_batch_ids = _load_local_get_batch_ids()
 
 
 def extract_date(value):

@@ -1,6 +1,20 @@
 import ipywidgets as widgets
-from api_calls import get_batch_ids
+import importlib.util
+import os
 import re
+
+
+def _load_local_get_batch_ids():
+    api_calls_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_calls.py")
+    spec = importlib.util.spec_from_file_location("workspace_api_calls", api_calls_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load local api_calls module at {api_calls_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.get_batch_ids
+
+
+get_batch_ids = _load_local_get_batch_ids()
 
 def extract_date(s):
     # Suche nach jedem 8-stelligen Datum, das mit "20" beginnt

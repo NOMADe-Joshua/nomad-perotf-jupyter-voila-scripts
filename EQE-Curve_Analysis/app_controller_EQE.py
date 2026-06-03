@@ -17,16 +17,26 @@ from IPython.display import HTML, Javascript, clear_output, display
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 workspace_dir = os.path.dirname(base_dir)
-if workspace_dir not in sys.path:
-    sys.path.append(workspace_dir)
+if workspace_dir in sys.path:
+    sys.path.remove(workspace_dir)
+sys.path.insert(0, workspace_dir)
 
-from batch_selection_EQE import create_batch_selection
-from data_manager_EQE import DataManagerEQE
-from diagnostic_helper_EQE import add_diagnostic_button_to_app, diagnose_eqe_loading
-from font_size_ui_EQE import FontSizeUI
-from gui_components_EQE import AuthenticationUI, ColorSchemeSelector, SaveUI
-from plot_manager_EQE import create_eqe_figure
-from resizable_plot_utility_EQE import ResizablePlotManager
+try:
+    from batch_selection_EQE import create_batch_selection
+    from data_manager_EQE import DataManagerEQE
+    from diagnostic_helper_EQE import add_diagnostic_button_to_app, diagnose_eqe_loading
+    from font_size_ui_EQE import FontSizeUI
+    from gui_components_EQE import AuthenticationUI, ColorSchemeSelector, SaveUI
+    from plot_manager_EQE import create_eqe_figure
+    from resizable_plot_utility_EQE import ResizablePlotManager
+except ImportError:
+    from .batch_selection_EQE import create_batch_selection
+    from .data_manager_EQE import DataManagerEQE
+    from .diagnostic_helper_EQE import add_diagnostic_button_to_app, diagnose_eqe_loading
+    from .font_size_ui_EQE import FontSizeUI
+    from .gui_components_EQE import AuthenticationUI, ColorSchemeSelector, SaveUI
+    from .plot_manager_EQE import create_eqe_figure
+    from .resizable_plot_utility_EQE import ResizablePlotManager
 
 
 class SimpleAuthManager:
