@@ -2128,24 +2128,45 @@ If you tested specific variables or conditions for each sample, please write the
         
         if filtered_jv_data.empty:
             return pd.DataFrame()
-        
-        use_cycle_number = 'cycle_number' in filtered_jv_data.columns and 'cycle_number' in original_curves_data.columns
 
-        # Get unique sample_id + cell + direction + ilum combinations from filtered JV
+        def _norm_text(value):
+            if pd.isna(value):
+                return None
+            return str(value)
+
+        def _norm_cycle(value):
+            if pd.isna(value):
+                return None
+            try:
+                return int(value)
+            except Exception:
+                return None
+
         filtered_combinations = set()
         for _, row in filtered_jv_data.iterrows():
-            combination = (row['sample_id'], row['cell'], row['direction'], row['ilum'])
-            if use_cycle_number and 'cycle_number' in row.index and pd.notna(row['cycle_number']):
-                combination = combination + (int(row['cycle_number']),)
+            sample_key = row.get('sample_id', row.get('sample', None))
+            combination = (
+                _norm_text(sample_key),
+                _norm_text(row.get('cell', None)),
+                _norm_text(row.get('direction', None)),
+                _norm_text(row.get('ilum', None)),
+                _norm_text(row.get('px_number', None)),
+                _norm_cycle(row.get('cycle_number', None)),
+            )
             filtered_combinations.add(combination)
         
         # Filter curves data to match exactly
         def should_include_curve(curve_row):
             if 'sample_id' not in curve_row:
                 return False
-            combination = (curve_row['sample_id'], curve_row['cell'], curve_row['direction'], curve_row['ilum'])
-            if use_cycle_number and 'cycle_number' in curve_row.index and pd.notna(curve_row['cycle_number']):
-                combination = combination + (int(curve_row['cycle_number']),)
+            combination = (
+                _norm_text(curve_row.get('sample_id', curve_row.get('sample', None))),
+                _norm_text(curve_row.get('cell', None)),
+                _norm_text(curve_row.get('direction', None)),
+                _norm_text(curve_row.get('ilum', None)),
+                _norm_text(curve_row.get('px_number', None)),
+                _norm_cycle(curve_row.get('cycle_number', None)),
+            )
             return combination in filtered_combinations
         
         matching_curves = original_curves_data[original_curves_data.apply(should_include_curve, axis=1)].copy()

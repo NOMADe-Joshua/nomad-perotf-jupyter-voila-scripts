@@ -52,6 +52,49 @@ def extract_status_from_metadata(data, metadata):
     return 'N/A'
 
 
+def extract_px_and_cycle_info(*texts):
+    """Extract px and cycle identifiers from description/file-name text.
+
+    Supports these cases:
+    - pxN
+    - Cycle_M
+    - pxNCycle_M
+    - no px/cycle info
+    """
+    import re
+
+    combined_pattern = re.compile(r'px(?P<px>\d+)Cycle_(?P<cycle>\d+)', re.IGNORECASE)
+    px_pattern = re.compile(r'px(?P<px>\d+)(?!Cycle)', re.IGNORECASE)
+    cycle_pattern = re.compile(r'Cycle_(?P<cycle>\d+)', re.IGNORECASE)
+
+    px_number = None
+    cycle_number = None
+
+    for text in texts:
+        if not text:
+            continue
+
+        combined_match = combined_pattern.search(str(text))
+        if combined_match:
+            if px_number is None:
+                px_number = f"px{combined_match.group('px')}"
+            if cycle_number is None:
+                cycle_number = int(combined_match.group('cycle'))
+            continue
+
+        if px_number is None:
+            px_match = px_pattern.search(str(text))
+            if px_match:
+                px_number = f"px{px_match.group('px')}"
+
+        if cycle_number is None:
+            cycle_match = cycle_pattern.search(str(text))
+            if cycle_match:
+                cycle_number = int(cycle_match.group('cycle'))
+
+    return px_number, cycle_number
+
+
 class DataManager:
     """Main data management class for JV analysis application"""
     
@@ -255,45 +298,16 @@ class DataManager:
                     
                     import re
                     
-                    # Strategy 1: Extract pixel number (px#)
-                    px_number = None
-                    
-                    # Pattern 1: From description "Notes from file name: px3Cycle_0"
-                    desc_match = re.search(r'px(\d+)Cycle', description, re.IGNORECASE)
-                    if desc_match:
-                        px_number = f"px{desc_match.group(1)}"
-                    
-                    # Pattern 2: From filename ".px3Cycle_0"
-                    if not px_number:
-                        file_match = re.search(r'\.px(\d+)Cycle', filename, re.IGNORECASE)
-                        if file_match:
-                            px_number = f"px{file_match.group(1)}"
-                    
-                    # Strategy 2: Extract cycle number (Cycle_#)
-                    cycle_number = None
-                    
-                    # Pattern 1: From description "Notes from file name: px3Cycle_0"
-                    desc_cycle_match = re.search(r'Cycle_(\d+)', description, re.IGNORECASE)
-                    if desc_cycle_match:
-                        cycle_number = int(desc_cycle_match.group(1))
+                    # Extract px/cycle from description and file name.
+                    # This covers pxN, Cycle_M, pxNCycle_M, and missing values.
+                    px_number, cycle_number = extract_px_and_cycle_info(description, filename)
+
+                    if cycle_number is not None:
                         has_any_cycle_data = True
-                        
-                        cycle_key = f"{sid}_{px_number}"
+                        cycle_key = f"{sid}_{px_number or 'no_px'}"
                         if cycle_key not in cycle_counts:
                             cycle_counts[cycle_key] = set()
                         cycle_counts[cycle_key].add(cycle_number)
-                    
-                    # Pattern 2: From filename "Cycle_0"
-                    if cycle_number is None:
-                        file_cycle_match = re.search(r'Cycle_(\d+)', filename, re.IGNORECASE)
-                        if file_cycle_match:
-                            cycle_number = int(file_cycle_match.group(1))
-                            has_any_cycle_data = True
-                            
-                            cycle_key = f"{sid}_{px_number}"
-                            if cycle_key not in cycle_counts:
-                                cycle_counts[cycle_key] = set()
-                            cycle_counts[cycle_key].add(cycle_number)
                     
                     # Process each JV curve
                     for c in jv_data["jv_curve"]:
@@ -455,24 +469,45 @@ class DataManager:
         """Create curves data that exactly matches filtered JV data using sample_id"""
         if not hasattr(self, 'data') or 'curves' not in self.data or filtered_jv_df.empty:
             return pd.DataFrame()
-        
-        use_cycle_number = 'cycle_number' in filtered_jv_df.columns and 'cycle_number' in self.data['curves'].columns
 
-        # Get unique sample_id + cell + direction + ilum combinations from filtered JV
+        def _norm_text(value):
+            if pd.isna(value):
+                return None
+            return str(value)
+
+        def _norm_cycle(value):
+            if pd.isna(value):
+                return None
+            try:
+                return int(value)
+            except Exception:
+                return None
+
+        # Build normalized fixed-length keys.
         filtered_combinations = set()
         for _, row in filtered_jv_df.iterrows():
-            combination = (row['sample_id'], row['cell'], row['direction'], row['ilum'])
-            if use_cycle_number and 'cycle_number' in row.index and pd.notna(row['cycle_number']):
-                combination = combination + (int(row['cycle_number']),)
+            sample_key = row.get('sample_id', row.get('sample', None))
+            combination = (
+                _norm_text(sample_key),
+                _norm_text(row.get('cell', None)),
+                _norm_text(row.get('direction', None)),
+                _norm_text(row.get('ilum', None)),
+                _norm_text(row.get('px_number', None)),
+                _norm_cycle(row.get('cycle_number', None)),
+            )
             filtered_combinations.add(combination)
-        
-        # Filter curves data to match exactly
+
         def should_include_curve(curve_row):
             if 'sample_id' not in curve_row:
                 return False
-            combination = (curve_row['sample_id'], curve_row['cell'], curve_row['direction'], curve_row['ilum'])
-            if use_cycle_number and 'cycle_number' in curve_row.index and pd.notna(curve_row['cycle_number']):
-                combination = combination + (int(curve_row['cycle_number']),)
+            combination = (
+                _norm_text(curve_row.get('sample_id', curve_row.get('sample', None))),
+                _norm_text(curve_row.get('cell', None)),
+                _norm_text(curve_row.get('direction', None)),
+                _norm_text(curve_row.get('ilum', None)),
+                _norm_text(curve_row.get('px_number', None)),
+                _norm_cycle(curve_row.get('cycle_number', None)),
+            )
             return combination in filtered_combinations
         
         curves_data = self.data['curves']

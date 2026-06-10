@@ -869,68 +869,7 @@ class PlotManager:
             
             print(f"  • {condition}: {sample}_{cell} ({direction}, PCE: {pce:.2f}%)")
             
-            # Build a sequence of progressively relaxed matching masks so we
-            # always prefer the exact measurement (sample_id+cell+px+cycle+direction+ilum)
-            # but fall back to looser matches (dropping direction/px/cycle) until
-            # we find something. This guarantees we plot the measurement that
-            # corresponds to the `best_row` (highest PCE) when possible.
-            px_number = best_row.get('px_number', None)
-            cycle_number = best_row.get('cycle_number', None)
-
-            base_mask = (curves_data['sample_id'] == sample_id) & (curves_data['cell'] == cell)
-
-            candidate_masks = []
-
-            # Most specific: match px, cycle, direction, ilum
-            if 'direction' in curves_data.columns and pd.notna(direction) and pd.notna(px_number) and pd.notna(cycle_number):
-                candidate_masks.append(base_mask &
-                                       (curves_data['px_number'] == px_number) &
-                                       (curves_data['cycle_number'] == cycle_number) &
-                                       (curves_data['direction'] == direction) &
-                                       (curves_data['ilum'] == ilum))
-
-            # Match px, cycle, direction (no ilum)
-            if 'direction' in curves_data.columns and pd.notna(direction) and pd.notna(px_number) and pd.notna(cycle_number):
-                candidate_masks.append(base_mask &
-                                       (curves_data['px_number'] == px_number) &
-                                       (curves_data['cycle_number'] == cycle_number) &
-                                       (curves_data['direction'] == direction))
-
-            # Match cycle + direction
-            if 'direction' in curves_data.columns and pd.notna(direction) and pd.notna(cycle_number):
-                candidate_masks.append(base_mask &
-                                       (curves_data['cycle_number'] == cycle_number) &
-                                       (curves_data['direction'] == direction) &
-                                       (curves_data['ilum'] == ilum))
-
-            # Match direction + ilum (ignore px/cycle)
-            if 'direction' in curves_data.columns and pd.notna(direction):
-                candidate_masks.append(base_mask &
-                                       (curves_data['direction'] == direction) &
-                                       (curves_data['ilum'] == ilum))
-
-            # Match px + cycle (any direction)
-            if pd.notna(px_number) and pd.notna(cycle_number):
-                candidate_masks.append(base_mask &
-                                       (curves_data['px_number'] == px_number) &
-                                       (curves_data['cycle_number'] == cycle_number) &
-                                       (curves_data['ilum'] == ilum))
-
-            # Match ilum only
-            candidate_masks.append(base_mask & (curves_data['ilum'] == ilum))
-
-            # Least specific: just sample_id + cell
-            candidate_masks.append(base_mask)
-
-            device_curves = pd.DataFrame()
-            for mask in candidate_masks:
-                try:
-                    subset = curves_data[mask]
-                except Exception:
-                    subset = pd.DataFrame()
-                if not subset.empty:
-                    device_curves = subset.copy()
-                    break
+            device_curves = self._select_best_curve_rows_for_jv_row(best_row, curves_data)
             
             if device_curves.empty:
                 print(f"    Warning: No curves found for {condition}")
@@ -1041,6 +980,28 @@ class PlotManager:
         sample_key = row.get('sample_id', None)
         if pd.isna(sample_key):
             sample_key = row.get('sample', None)
+        if pd.isna(sample_key):
+            sample_key = None
+        elif sample_key is not None:
+            sample_key = str(sample_key)
+
+        cell_value = row.get('cell', None)
+        if pd.isna(cell_value):
+            cell_value = None
+        elif cell_value is not None:
+            cell_value = str(cell_value)
+
+        direction_value = row.get('direction', None)
+        if pd.isna(direction_value):
+            direction_value = None
+        elif direction_value is not None:
+            direction_value = str(direction_value)
+
+        ilum_value = row.get('ilum', None)
+        if pd.isna(ilum_value):
+            ilum_value = None
+        elif ilum_value is not None:
+            ilum_value = str(ilum_value)
 
         cycle_number = row.get('cycle_number', None)
         if pd.isna(cycle_number):
@@ -1056,12 +1017,50 @@ class PlotManager:
 
         return (
             sample_key,
-            row.get('cell', None),
-            row.get('direction', None),
-            row.get('ilum', None),
+            cell_value,
+            direction_value,
+            ilum_value,
             px_number,
             cycle_number
         )
+
+    def _select_best_curve_rows_for_jv_row(self, best_row, curves_data):
+        """Select curve rows that best match one JV summary row."""
+        if curves_data is None or curves_data.empty:
+            return pd.DataFrame()
+
+        target_key = self._build_measurement_key(best_row)
+        target_sample = target_key[0]
+        target_cell = target_key[1]
+
+        keyed_curves = curves_data.copy()
+        keyed_curves['_match_key'] = keyed_curves.apply(self._build_measurement_key, axis=1)
+
+        exact = keyed_curves[keyed_curves['_match_key'] == target_key]
+        if not exact.empty:
+            return exact.drop(columns=['_match_key'])
+
+        scoped = keyed_curves[
+            keyed_curves['_match_key'].apply(lambda k: k[0] == target_sample and k[1] == target_cell)
+        ]
+        if scoped.empty:
+            return pd.DataFrame()
+
+        candidate_keys = scoped['_match_key'].drop_duplicates().tolist()
+
+        def _score_key(candidate_key):
+            score = 0
+            for idx, weight in ((2, 4), (3, 3), (4, 2), (5, 2)):
+                target_value = target_key[idx]
+                if target_value is None:
+                    continue
+                if candidate_key[idx] == target_value:
+                    score += weight
+            non_null_meta = sum(v is not None for v in candidate_key[2:])
+            return (score, non_null_meta)
+
+        best_key = max(candidate_keys, key=lambda k: (_score_key(k), str(k)))
+        return scoped[scoped['_match_key'] == best_key].drop(columns=['_match_key'])
 
     def _split_batch_sample_label(self, value):
         """Split a label at the last underscore into batch and sample parts."""
