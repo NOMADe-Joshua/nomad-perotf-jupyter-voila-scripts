@@ -10,9 +10,8 @@ from IPython.display import display, clear_output
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
-JV_DIR = os.path.abspath(os.path.join(ROOT, "JV-Analysis_v6"))
 
-for path in [ROOT, HERE, JV_DIR]:
+for path in [ROOT, HERE]:
     if path not in sys.path:
         sys.path.append(path)
 
@@ -51,6 +50,7 @@ class AbsPLAppController:
 
     def _bind_events(self):
         self.auth_ui.set_success_callback(self._on_auth_success)
+        self.gui.set_auto_apply_callback(lambda: self._on_apply_filters(None))
 
         self.gui.apply_filters_button.on_click(self._on_apply_filters)
         self.gui.create_plots_button.on_click(self._on_create_plots)
@@ -165,25 +165,37 @@ class AbsPLAppController:
         b = spec.get("option_b")
         c = spec.get("option_c")
 
-        if ptype == "Spectra Overlay":
-            normalize = b == "yes"
-            log_y = c == "log"
-            return self.plot_manager.spectra_overlay(spectra_df, color_by=a, normalize=normalize, log_y=log_y)
+        if ptype == "PL":
+            return self.plot_manager.pl_plot(
+                spectra_df,
+                color_by=a or "sample_id",
+                y_source=b or "auto",
+                include_nearest_sweep=bool(spec.get("include_sweep_pl", False)),
+            )
 
-        if ptype == "Average Spectra":
-            y_source = b if b in ["auto", "luminescence_flux_density", "raw_spectrum_counts"] else "auto"
-            return self.plot_manager.average_spectra(spectra_df, group_by=a, y_source=y_source)
+        if ptype == "Sweep":
+            return self.plot_manager.spectra_overlay(
+                spectra_df,
+                measurement_type="sweep",
+                group_mode=a or "combined",
+                color_by=b or "sample_id",
+                y_source=c or "raw_spectrum_counts",
+                title="Sweep Spectra",
+            )
 
-        if ptype == "Sweep Heatmap":
-            sample = None if a in [None, "-"] else a
-            source = b if b in ["raw_spectrum_counts", "luminescence_flux_density"] else "raw_spectrum_counts"
-            return self.plot_manager.sweep_heatmap(spectra_df, sample=sample, intensity_source=source)
-
-        if ptype == "Scalar Boxplot":
-            return self.plot_manager.scalar_boxplot(summary_df, y_col=a, x_col=b)
-
-        if ptype == "Scalar Scatter":
-            return self.plot_manager.scalar_scatter(summary_df, x_col=a, y_col=b, color_col=c)
+        if ptype == "LuQY vs Laser Intensity":
+            return self.plot_manager.plqy_intensity_plot(
+                summary_df,
+                y_col="luminescence_quantum_yield",
+                group_mode=a or "combined",
+                color_by=b or "sample_id",
+                log_x=(c == "log"),
+                title="LuQY vs Laser Intensity",
+                fit_enabled=bool(spec.get("fit_enabled", False)),
+                fit_min=spec.get("fit_min", None),
+                fit_max=spec.get("fit_max", None),
+                measurement_type="sweep",
+            )
 
         return None
 
@@ -202,13 +214,24 @@ class AbsPLAppController:
 
         figs = []
         names = []
+        legend_table_flags = []
         for i, spec in enumerate(specs, start=1):
             try:
-                fig = self._make_figure(spec, summary_df, spectra_df)
-                if fig is not None:
-                    figs.append(fig)
+                result = self._make_figure(spec, summary_df, spectra_df)
+                if result is None:
+                    continue
+
+                if isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], list):
+                    result_figs, result_names = result
+                    figs.extend(result_figs)
+                    names.extend(result_names)
+                    legend_table_flags.extend([bool(spec.get("legend_table_below", False))] * len(result_figs))
+                else:
+                    figs.append(result)
                     names.append(f"abspl_plot_{i}")
-                    debug_logger_abspl.add("PLOT", f"Generated plot {i}: {spec['plot_type']}", level="SUCCESS")
+                    legend_table_flags.append(bool(spec.get("legend_table_below", False)))
+
+                debug_logger_abspl.add("PLOT", f"Generated plot {i}: {spec['plot_type']}", level="SUCCESS")
             except Exception as exc:
                 debug_logger_abspl.add("PLOT", f"Plot {i} failed ({spec.get('plot_type')}): {exc}", level="ERROR")
 
@@ -217,7 +240,7 @@ class AbsPLAppController:
             if not figs:
                 print("No figures generated.")
             else:
-                self.resizable_plot_manager.display_plots_resizable(figs, filenames=names)
+                self.resizable_plot_manager.display_plots_resizable(figs, filenames=names, legend_table_flags=legend_table_flags)
 
         self._on_refresh_diagnostics(None)
 

@@ -199,44 +199,52 @@ class AbsPLDataManager:
             self.data["filtered_spectra"] = pd.DataFrame()
             return pd.DataFrame(), pd.DataFrame()
 
-        measurement_types = filter_config.get("measurement_types", [])
-        sample_ids = filter_config.get("samples", [])
-        spot_sizes = filter_config.get("laser_spot_sizes", [])
-        cycle_mode = filter_config.get("cycle_mode", "all")
-        specific_cycles = filter_config.get("specific_cycles", [])
-        numeric_filters = filter_config.get("numeric_filters", [])
+        row_filters = filter_config.get("row_filters", [])
 
-        if measurement_types:
-            summary_df = summary_df[summary_df["measurement_type"].isin(measurement_types)]
+        def _is_all(value):
+            return value in (None, "", "__all__")
 
-        if sample_ids:
-            summary_df = summary_df[summary_df["sample_id"].isin(sample_ids)]
-
-        if spot_sizes:
-            summary_df = summary_df[summary_df["laser_spot_size"].isin(spot_sizes)]
-
-        if cycle_mode == "first":
-            summary_df = summary_df.sort_values(["sample_id", "cycle_number"]).groupby("sample_id").head(1)
-        elif cycle_mode == "last":
-            summary_df = summary_df.sort_values(["sample_id", "cycle_number"]).groupby("sample_id").tail(1)
-        elif cycle_mode == "specific" and specific_cycles:
-            summary_df = summary_df[summary_df["cycle_number"].isin(specific_cycles)]
-
-        operators = {
-            ">": lambda s, v: s > v,
-            ">=": lambda s, v: s >= v,
-            "<": lambda s, v: s < v,
-            "<=": lambda s, v: s <= v,
-            "==": lambda s, v: s == v,
-            "!=": lambda s, v: s != v,
-        }
-
-        for column, op, raw in numeric_filters:
-            if column not in summary_df.columns or op not in operators:
+        effective_filters = []
+        for row in row_filters:
+            sample = row.get("sample")
+            mtype = row.get("measurement_type")
+            spot = row.get("laser_spot_size")
+            cycle = row.get("cycle")
+            if _is_all(sample) and _is_all(mtype) and _is_all(spot) and _is_all(cycle):
                 continue
-            series = pd.to_numeric(summary_df[column], errors="coerce")
-            threshold = float(raw)
-            summary_df = summary_df[operators[op](series, threshold).fillna(False)]
+            effective_filters.append(row)
+
+        if effective_filters:
+            summary_df = summary_df.copy()
+            cycle_series = pd.to_numeric(summary_df["cycle_number"], errors="coerce")
+            mask = pd.Series(False, index=summary_df.index)
+
+            for row in effective_filters:
+                row_mask = pd.Series(True, index=summary_df.index)
+
+                sample = row.get("sample")
+                if not _is_all(sample):
+                    row_mask &= summary_df["sample_id"].astype(str) == str(sample)
+
+                mtype = row.get("measurement_type")
+                if not _is_all(mtype):
+                    row_mask &= summary_df["measurement_type"].astype(str) == str(mtype)
+
+                spot = row.get("laser_spot_size")
+                if not _is_all(spot):
+                    row_mask &= summary_df["laser_spot_size"].astype(str) == str(spot)
+
+                cycle = row.get("cycle")
+                if not _is_all(cycle):
+                    try:
+                        cycle_int = int(cycle)
+                        row_mask &= cycle_series == cycle_int
+                    except Exception:
+                        row_mask &= False
+
+                mask |= row_mask
+
+            summary_df = summary_df[mask]
 
         allowed = set(summary_df["measurement_uid"].tolist())
         spectra_df = spectra_df[spectra_df["measurement_uid"].isin(allowed)].copy()
@@ -264,6 +272,8 @@ class AbsPLDataManager:
                 "measurement_types": [],
                 "samples": [],
                 "laser_spot_sizes": [],
+                "cycles": [],
+                "filter_rows": [],
                 "numeric_columns": [],
             }
 
@@ -282,9 +292,21 @@ class AbsPLDataManager:
             if c in summary.columns
         ]
 
+        filter_rows = summary[["sample_id", "measurement_type", "laser_spot_size", "cycle_number"]].copy()
+        filter_rows["cycle_number"] = pd.to_numeric(filter_rows["cycle_number"], errors="coerce")
+        filter_rows = (
+            filter_rows.dropna(subset=["sample_id", "measurement_type", "laser_spot_size", "cycle_number"])
+            .assign(cycle_number=lambda df: df["cycle_number"].astype(int))
+            .drop_duplicates()
+        )
+
+        cycles = pd.to_numeric(summary["cycle_number"], errors="coerce").dropna().astype(int).unique().tolist()
+
         return {
             "measurement_types": sorted(summary["measurement_type"].dropna().astype(str).unique().tolist()),
             "samples": sorted(summary["sample_id"].dropna().astype(str).unique().tolist()),
             "laser_spot_sizes": sorted(summary["laser_spot_size"].dropna().astype(str).unique().tolist()),
+            "cycles": sorted(cycles),
+            "filter_rows": filter_rows.to_dict("records"),
             "numeric_columns": numeric_columns,
         }

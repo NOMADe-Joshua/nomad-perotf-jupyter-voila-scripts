@@ -49,30 +49,126 @@ class AbsPLPlotManager:
             return f"rgba({r},{g},{b},{alpha})"
         return f"rgba(31,119,180,{alpha})"
 
-    def spectra_overlay(self, df, color_by="condition", normalize=False, log_y=False, y_source="auto"):
-        fig = go.Figure()
-        if df is None or df.empty:
+    def _get_spectrum_source(self, row, y_source="auto"):
+        if y_source == "luminescence_flux_density":
+            return row.get("luminescence_flux_density", None)
+        if y_source == "raw_spectrum_counts":
+            return row.get("raw_spectrum_counts", None)
+
+        source = row.get("spectrum_source", None)
+        if source == "luminescence_flux_density":
+            return row.get("luminescence_flux_density", None)
+        if source == "raw_spectrum_counts":
+            return row.get("raw_spectrum_counts", None)
+        return row.get("intensity", row.get("y_data", None))
+
+    def _resolve_color_value(self, row, color_by):
+        if color_by not in row.index:
+            return "Unknown"
+        value = row.get(color_by, "Unknown")
+        if pd.isna(value):
+            return "Unknown"
+        return str(value)
+
+    def _split_groups(self, df, group_mode="combined"):
+        if group_mode == "per_sample":
+            if "sample_id" not in df.columns:
+                return [("All samples", df.copy())]
+            groups = []
+            for sample_id, sample_df in df.groupby("sample_id"):
+                groups.append((str(sample_id), sample_df.copy()))
+            return groups
+        if group_mode == "separate_substrates":
+            group_col = "substrate" if "substrate" in df.columns else ("condition" if "condition" in df.columns else "sample_id")
+            groups = []
+            for substrate, substrate_df in df.groupby(group_col):
+                groups.append((str(substrate), substrate_df.copy()))
+            return groups
+        return [("Combined", df.copy())]
+
+    def _nearest_sweep_to_one_sun(self, sweep_df):
+        if sweep_df is None or sweep_df.empty:
+            return pd.DataFrame()
+
+        w = sweep_df.copy()
+        w["_laser"] = pd.to_numeric(w.get("laser_intensity_suns"), errors="coerce")
+        w["_dist"] = (w["_laser"] - 1.0).abs()
+
+        if "sample_id" not in w.columns:
+            with_dist = w[w["_dist"].notna()]
+            if not with_dist.empty:
+                return with_dist.nsmallest(1, "_dist").drop(columns=["_laser", "_dist"], errors="ignore")
+            return w.head(1).drop(columns=["_laser", "_dist"], errors="ignore")
+
+        selected = []
+        for _, gdf in w.groupby("sample_id"):
+            with_dist = gdf[gdf["_dist"].notna()]
+            if not with_dist.empty:
+                selected.append(with_dist.nsmallest(1, "_dist"))
+            else:
+                selected.append(gdf.head(1))
+
+        if not selected:
+            return pd.DataFrame()
+
+        merged = pd.concat(selected, ignore_index=False)
+        return merged.drop(columns=["_laser", "_dist"], errors="ignore")
+
+    def pl_plot(self, spectra_df, color_by="sample_id", y_source="auto", include_nearest_sweep=True):
+        if spectra_df is None or spectra_df.empty:
             return self._apply_layout(go.Figure(), "No data", "Wavelength (nm)", "Intensity")
 
-        if color_by not in df.columns:
-            color_by = "condition" if "condition" in df.columns else "sample"
+        pl_df = spectra_df[spectra_df["measurement_type"].astype(str) == "pl"].copy()
+        if pl_df.empty:
+            return self._apply_layout(go.Figure(), "No PL data available", "Wavelength (nm)", "Intensity")
 
-        categories = df[color_by].fillna("Unknown").astype(str).unique().tolist()
+        if include_nearest_sweep:
+            sweep_df = spectra_df[spectra_df["measurement_type"].astype(str) == "sweep"].copy()
+            nearest_sweep_df = self._nearest_sweep_to_one_sun(sweep_df)
+            if not nearest_sweep_df.empty:
+                working_df = pd.concat([pl_df, nearest_sweep_df], ignore_index=True)
+                title = "PL + PL (sweep, nearest to 1 sun)"
+            else:
+                working_df = pl_df
+                title = "PL"
+        else:
+            working_df = pl_df
+            title = "PL"
+
+        return self._make_spectrum_figure(
+            working_df,
+            title=title,
+            y_title="Intensity",
+            color_by=color_by,
+            normalize=False,
+            log_y=False,
+            y_source=y_source,
+        )
+
+    def _make_spectrum_figure(self, df, title, y_title, color_by="sample_id", normalize=False, log_y=False, y_source="auto", show_laser_intensity=False):
+        fig = go.Figure()
+        if df is None or df.empty:
+            return self._apply_layout(go.Figure(), title, "Wavelength (nm)", y_title)
+
+        if color_by not in df.columns:
+            color_by = "sample_id" if "sample_id" in df.columns else ("condition" if "condition" in df.columns else None)
+
+        if color_by is None:
+            categories = ["All"]
+        else:
+            categories = df[color_by].fillna("Unknown").astype(str).unique().tolist()
+
         colors = px.colors.qualitative.Plotly
         color_map = {c: colors[i % len(colors)] for i, c in enumerate(categories)}
 
         for _, row in df.iterrows():
             x = row.get("wavelength", None)
-            if y_source == "luminescence_flux_density":
-                y = row.get("luminescence_flux_density", None)
-            elif y_source == "raw_spectrum_counts":
-                y = row.get("raw_spectrum_counts", None)
-            else:
-                y = row.get("y_data", None)
+            y = self._get_spectrum_source(row, y_source=y_source)
             if not isinstance(x, list) or not isinstance(y, list):
                 continue
             if len(x) == 0 or len(y) == 0:
                 continue
+
             n = min(len(x), len(y))
             x = np.asarray(x[:n], dtype=float)
             y = np.asarray(y[:n], dtype=float)
@@ -94,29 +190,80 @@ class AbsPLPlotManager:
                 if y.size == 0:
                     continue
 
-            label = str(row.get(color_by, "Unknown"))
+            color_value = self._resolve_color_value(row, color_by) if color_by is not None else "All"
             sample = str(row.get("sample_id", "?"))
             cycle = row.get("cycle_number", "?")
             mtype = str(row.get("measurement_type", "unknown"))
-            trace_name = f"{label} | S:{sample} | C:{cycle} | {mtype}"
+            laser_intensity = pd.to_numeric(row.get("laser_intensity_suns"), errors="coerce")
+            if show_laser_intensity and np.isfinite(laser_intensity):
+                trace_name = f"{color_value} | S:{sample} | C:{cycle} | {mtype} | I:{laser_intensity:.4g} sun"
+                hover_extra = f"<br>Laser intensity: {laser_intensity:.4g} sun"
+            else:
+                trace_name = f"{color_value} | S:{sample} | C:{cycle} | {mtype}"
+                hover_extra = ""
 
             fig.add_trace(
                 go.Scatter(
                     x=x.tolist(),
                     y=y.tolist(),
                     mode="lines",
-                    line=dict(width=2, color=color_map.get(label, colors[0])),
+                    line=dict(width=2, color=color_map.get(color_value, colors[0])),
                     name=trace_name,
-                    legendgroup=label,
+                    legendgroup=color_value,
                     showlegend=True,
+                    hovertemplate=(
+                        "<b>%{fullData.name}</b><br>"
+                        "Wavelength: %{x:.4g} nm<br>"
+                        "Intensity: %{y:.4g}"
+                        f"{hover_extra}<extra></extra>"
+                    ),
                 )
             )
 
-        y_title = "Normalized intensity" if normalize else "Intensity"
-        fig = self._apply_layout(fig, "AbsPL Spectra Overlay", "Wavelength (nm)", y_title)
+        fig = self._apply_layout(fig, title, "Wavelength (nm)", y_title)
         if log_y:
-            fig.update_yaxes(type="log", title="Intensity (log scale)")
+            fig.update_yaxes(type="log")
         return fig
+
+    def spectra_overlay(self, df, measurement_type=None, group_mode="combined", color_by="sample_id", normalize=False, log_y=False, y_source="auto", title=None):
+        """Plot PL or sweep spectra either combined or one figure per sample."""
+        if df is None or df.empty:
+            empty_title = title or "No data"
+            return self._apply_layout(go.Figure(), empty_title, "Wavelength (nm)", "Intensity")
+
+        working_df = df.copy()
+        if measurement_type is not None and "measurement_type" in working_df.columns:
+            working_df = working_df[working_df["measurement_type"].astype(str) == str(measurement_type)]
+
+        if working_df.empty:
+            empty_title = title or f"No {measurement_type or 'spectral'} data available"
+            return self._apply_layout(go.Figure(), empty_title, "Wavelength (nm)", "Intensity")
+
+        groups = self._split_groups(working_df, group_mode=group_mode)
+        figures = []
+        names = []
+        base_title = title or ("PL Spectra" if measurement_type == "pl" else "Sweep Spectra" if measurement_type == "sweep" else "AbsPL Spectra")
+
+        for group_name, group_df in groups:
+            group_title = base_title if group_mode == "combined" else f"{base_title} - {group_name}"
+            y_title = "Normalized intensity" if normalize else "Intensity"
+            fig = self._make_spectrum_figure(
+                group_df,
+                group_title,
+                y_title,
+                color_by=color_by,
+                normalize=normalize,
+                log_y=log_y,
+                y_source=y_source,
+                show_laser_intensity=(measurement_type == "sweep"),
+            )
+            figures.append(fig)
+            slug = group_name.replace(" ", "_").replace("/", "_") if group_name else "combined"
+            names.append(f"{measurement_type or 'spectra'}_{slug}.html")
+
+        if len(figures) == 1:
+            return figures[0]
+        return figures, names
 
     def average_spectra(self, df, group_by="condition", y_source="auto"):
         fig = go.Figure()
@@ -176,6 +323,184 @@ class AbsPLPlotManager:
             ))
 
         return self._apply_layout(fig, "Average Spectra by Group", "Wavelength (nm)", "Intensity")
+
+    def plqy_intensity_plot(self, df, y_col="luminescence_quantum_yield", group_mode="combined", color_by="sample_id", log_x=False, title=None, fit_enabled=False, fit_min=None, fit_max=None, measurement_type=None):
+        """Plot PLQY/LuQY versus excitation intensity."""
+        if df is None or df.empty:
+            empty_title = title or "No data"
+            return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_col)
+
+        working_df = df.copy()
+        if measurement_type is not None and "measurement_type" in working_df.columns:
+            working_df = working_df[working_df["measurement_type"].astype(str) == str(measurement_type)].copy()
+            if working_df.empty:
+                empty_title = title or f"No {measurement_type} data"
+                return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_col)
+
+        if y_col not in working_df.columns:
+            empty_title = title or f"Missing column: {y_col}"
+            return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_col)
+
+        working_df["_x"] = pd.to_numeric(working_df.get("laser_intensity_suns"), errors="coerce")
+        working_df[y_col] = pd.to_numeric(working_df[y_col], errors="coerce")
+        working_df = working_df.dropna(subset=["_x", y_col])
+        if working_df.empty:
+            empty_title = title or f"No valid values for {y_col}"
+            return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_col)
+
+        groups = self._split_groups(working_df, group_mode=group_mode)
+        figures = []
+        names = []
+        base_title = title or ("PLQY/LuQY vs Intensity" if y_col == "luminescence_quantum_yield" else f"{y_col} vs Intensity")
+        colors = px.colors.qualitative.Set2
+
+        for idx, (group_name, group_df) in enumerate(groups):
+            fig = go.Figure()
+            if color_by not in group_df.columns:
+                color_by_effective = "sample_id" if "sample_id" in group_df.columns else ("condition" if "condition" in group_df.columns else None)
+            else:
+                color_by_effective = color_by
+
+            if color_by_effective is None:
+                group_values = ["All"]
+            else:
+                group_values = group_df[color_by_effective].fillna("Unknown").astype(str).unique().tolist()
+
+            color_map = {value: colors[i % len(colors)] for i, value in enumerate(group_values)}
+
+            fit_color = "#111827"
+
+            for value in group_values:
+                sub = group_df if color_by_effective is None else group_df[group_df[color_by_effective].fillna("Unknown").astype(str) == value]
+                if sub.empty:
+                    continue
+                sub = sub.sort_values("_x")
+                x_values = sub["_x"].to_numpy(dtype=float)
+                y_values = sub[y_col].to_numpy(dtype=float)
+                trace_customdata = np.stack([
+                    sub.get("sample_id", pd.Series([""] * len(sub))).astype(str),
+                    sub.get("cycle_number", pd.Series([""] * len(sub))).astype(str),
+                    sub.get("measurement_type", pd.Series([""] * len(sub))).astype(str),
+                ], axis=-1)
+
+                if fit_enabled:
+                    fit_mask = np.isfinite(x_values) & np.isfinite(y_values)
+                    if fit_min is not None:
+                        fit_mask &= x_values >= float(fit_min)
+                    if fit_max is not None:
+                        fit_mask &= x_values <= float(fit_max)
+
+                    fig.add_trace(
+                        go.Scatter(
+                            x=x_values.tolist(),
+                            y=y_values.tolist(),
+                            mode="lines",
+                            name=value,
+                            legendgroup=value,
+                            line=dict(width=2, color=color_map.get(value, colors[0])),
+                            showlegend=True,
+                            hoverinfo="skip",
+                        )
+                    )
+
+                    if np.any(fit_mask):
+                        fig.add_trace(
+                            go.Scatter(
+                                x=x_values[fit_mask].tolist(),
+                                y=y_values[fit_mask].tolist(),
+                                mode="markers",
+                                name=f"{value} (fit points)",
+                                legendgroup=f"{value}_fit_points",
+                                marker=dict(size=9, color=color_map.get(value, colors[0]), symbol="circle"),
+                                customdata=trace_customdata[fit_mask],
+                                hovertemplate=(
+                                    "<b>%{legendgroup}</b><br>"
+                                    "Sample: %{customdata[0]}<br>"
+                                    "Cycle: %{customdata[1]}<br>"
+                                    "Type: %{customdata[2]}<br>"
+                                    f"Intensity: %{{x:.4g}}<br>{y_col}: %{{y:.4g}}<extra></extra>"
+                                ),
+                            )
+                        )
+
+                    if np.any(~fit_mask):
+                        fig.add_trace(
+                            go.Scatter(
+                                x=x_values[~fit_mask].tolist(),
+                                y=y_values[~fit_mask].tolist(),
+                                mode="markers",
+                                name=f"{value} (outside fit)",
+                                legendgroup=f"{value}_outside_fit",
+                                marker=dict(size=8, color=color_map.get(value, colors[0]), symbol="circle-open", opacity=0.55),
+                                customdata=trace_customdata[~fit_mask],
+                                hovertemplate=(
+                                    "<b>%{legendgroup}</b><br>"
+                                    "Sample: %{customdata[0]}<br>"
+                                    "Cycle: %{customdata[1]}<br>"
+                                    "Type: %{customdata[2]}<br>"
+                                    f"Intensity: %{{x:.4g}}<br>{y_col}: %{{y:.4g}}<extra></extra>"
+                                ),
+                            )
+                        )
+                else:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=x_values.tolist(),
+                            y=y_values.tolist(),
+                            mode="lines+markers",
+                            name=value,
+                            legendgroup=value,
+                            marker=dict(size=7, color=color_map.get(value, colors[0])),
+                            line=dict(width=2, color=color_map.get(value, colors[0])),
+                            customdata=trace_customdata,
+                            hovertemplate=(
+                                "<b>%{legendgroup}</b><br>"
+                                "Sample: %{customdata[0]}<br>"
+                                "Cycle: %{customdata[1]}<br>"
+                                "Type: %{customdata[2]}<br>"
+                                f"Intensity: %{{x:.4g}}<br>{y_col}: %{{y:.4g}}<extra></extra>"
+                            ),
+                        )
+                    )
+
+                if fit_enabled:
+                    x_fit_source = x_values[fit_mask]
+                    y_fit_source = y_values[fit_mask]
+
+                    if x_fit_source.size >= 2 and y_fit_source.size >= 2:
+                        x_for_fit = np.log(x_fit_source) if log_x else x_fit_source
+                        if np.all(np.isfinite(x_for_fit)) and np.nanstd(x_for_fit) > 0:
+                            slope, intercept = np.polyfit(x_for_fit, y_fit_source, 1)
+                            x_line = np.linspace(np.nanmin(x_fit_source), np.nanmax(x_fit_source), 120)
+                            y_line = slope * (np.log(x_line) if log_x else x_line) + intercept
+                            fit_name = f"{value} fit"
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=x_line.tolist(),
+                                    y=y_line.tolist(),
+                                    mode="lines",
+                                    name=fit_name,
+                                    legendgroup=f"{value}_fit",
+                                    showlegend=True,
+                                    line=dict(color=fit_color, width=2, dash="dash"),
+                                    hovertemplate=(
+                                        f"Fit for {value}<br>"
+                                        f"Slope: {slope:.4f}<br>"
+                                        f"Intercept: {intercept:.4f}<extra></extra>"
+                                    ),
+                                )
+                            )
+
+            fig = self._apply_layout(fig, base_title if group_mode == "combined" else f"{base_title} - {group_name}", "Laser Intensity (suns)", y_col)
+            if log_x:
+                fig.update_xaxes(type="log")
+            figures.append(fig)
+            slug = group_name.replace(" ", "_").replace("/", "_") if group_name else "combined"
+            names.append(f"plqy_{slug}.html")
+
+        if len(figures) == 1:
+            return figures[0]
+        return figures, names
 
     def sweep_heatmap(self, df, sample=None, intensity_source="raw_spectrum_counts"):
         if df is None or df.empty:
