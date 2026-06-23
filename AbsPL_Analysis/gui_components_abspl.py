@@ -3,6 +3,9 @@ GUI components for modular AbsPL analysis app.
 """
 
 import ipywidgets as widgets
+import plotly.express as px
+import json
+from IPython.display import clear_output, display, HTML, Javascript
 
 
 class AbsPLGUIComponents:
@@ -61,24 +64,156 @@ class AbsPLGUIComponents:
     def _build_plot_widgets(self):
         self.plot_rows = []
         self.plot_rows_container = widgets.VBox([])
+        self.trace_order_values = []
+        
+        # Define plot presets for AbsPL
+        self.plot_presets = {
+            "Default": [
+                ("PL (only)", "", ""),
+                ("PL + PL (sweep ~1 sun)", "", ""),
+                ("Sweep", "", ""),
+                ("LuQY vs Laser Intensity", "", ""),
+            ],
+            "PL": [
+                ("PL (only)", "", ""),
+                ("PL + PL (sweep ~1 sun)", "", ""),
+            ],
+            "Sweep Analysis": [
+                ("Sweep", "", ""),
+                ("LuQY vs Laser Intensity", "", ""),
+            ],
+        }
 
         self.add_plot_button = widgets.Button(description="Add Plot", button_style="success")
         self.clear_plots_button = widgets.Button(description="Clear Plot Rows")
         self.create_plots_button = widgets.Button(description="Create Plots", button_style="primary")
+        
+        self.preset_dropdown = widgets.Dropdown(
+            options=list(self.plot_presets.keys()),
+            value="Default",
+            description="Presets:",
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(width="200px")
+        )
+        self.load_preset_button = widgets.Button(description="Load Preset", button_style="info")
+
+        self.color_selector = ColorSchemeSelector()
+        self._create_trace_order_section()
 
         self.add_plot_button.on_click(self._add_plot_row)
         self.clear_plots_button.on_click(self._clear_plot_rows)
+        self.load_preset_button.on_click(self._load_preset)
 
         self.plot_panel = widgets.VBox(
             [
                 widgets.HTML("<h3>Select Plots</h3>"),
+                widgets.HBox([self.preset_dropdown, self.load_preset_button]),
                 widgets.HBox([self.add_plot_button, self.clear_plots_button, self.create_plots_button]),
+                self.color_selector.get_widget(),
+                self.trace_order_section,
                 self.plot_rows_container,
                 self.output_plots,
             ]
         )
 
-        self._add_plot_row(None)
+        self._load_preset(None)
+
+    def _create_trace_order_section(self):
+        self.trace_order_state = widgets.Text(value="[]", layout=widgets.Layout(display="none"))
+        self.trace_order_state.add_class("abspl-trace-order-state")
+        self.trace_order_container = widgets.HTML(value="")
+
+        self.trace_order_section = widgets.VBox(
+            [
+                widgets.HTML("<b>Trace Order (Drag & Drop)</b>"),
+                widgets.HTML("<p style='margin: 0 0 8px 0; color: #666;'>Reorder samples to control plotting order and legend order.</p>"),
+                self.trace_order_container,
+                self.trace_order_state,
+            ],
+            layout=widgets.Layout(
+                border="1px solid #ddd",
+                padding="10px",
+                margin="8px 0",
+                display="none",
+            ),
+        )
+
+    def _update_trace_order_widget(self, values):
+        self.trace_order_values = [str(v) for v in values if v not in (None, "")]
+        if not self.trace_order_values:
+            self.trace_order_section.layout.display = "none"
+            self.trace_order_state.value = "[]"
+            self.trace_order_container.value = ""
+            return
+
+        self.trace_order_section.layout.display = "flex"
+        self.trace_order_state.value = json.dumps(self.trace_order_values)
+
+        rows = ""
+        for idx, value in enumerate(self.trace_order_values):
+            rows += (
+                f"<tr class='abspl-order-row' draggable='true' data-value='{value}'>"
+                f"<td style='width:24px;text-align:center;color:#999;cursor:grab;'>≡</td>"
+                f"<td style='padding:8px 10px;'><span class='abspl-order-idx'>{idx+1}</span></td>"
+                f"<td style='padding:8px 10px;'>{value}</td>"
+                "</tr>"
+            )
+
+        self.trace_order_container.value = (
+            "<style>"
+            ".abspl-order-table{width:100%;border-collapse:collapse;}"
+            ".abspl-order-table td{border-bottom:1px solid #eee;}"
+            ".abspl-order-row.drag-over{background:#eef6ff;border-top:2px solid #3b82f6;}"
+            "</style>"
+            "<table class='abspl-order-table'><tbody id='abspl-order-tbody'>"
+            f"{rows}"
+            "</tbody></table>"
+        )
+
+        js_code = """
+        (function(){
+            setTimeout(function(){
+                const tbody = document.querySelector('#abspl-order-tbody');
+                if(!tbody) return;
+                const rows = Array.from(tbody.querySelectorAll('tr.abspl-order-row'));
+                let dragged = null;
+
+                function syncState(){
+                    const ordered = Array.from(tbody.querySelectorAll('tr.abspl-order-row'))
+                        .map(r => r.getAttribute('data-value'))
+                        .filter(v => !!v);
+                    const stateInput = document.querySelector('.abspl-trace-order-state input, .abspl-trace-order-state textarea');
+                    if(stateInput){
+                        stateInput.value = JSON.stringify(ordered);
+                        stateInput.dispatchEvent(new Event('input', { bubbles: true }));
+                        stateInput.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    Array.from(tbody.querySelectorAll('tr.abspl-order-row')).forEach((row, i) => {
+                        const idx = row.querySelector('.abspl-order-idx');
+                        if(idx) idx.textContent = String(i+1);
+                    });
+                }
+
+                rows.forEach(row => {
+                    row.addEventListener('dragstart', function(e){ dragged=this; this.style.opacity='0.5'; e.dataTransfer.effectAllowed='move'; });
+                    row.addEventListener('dragend', function(){ this.style.opacity='1'; rows.forEach(r => r.classList.remove('drag-over')); });
+                    row.addEventListener('dragover', function(e){ e.preventDefault(); this.classList.add('drag-over'); });
+                    row.addEventListener('dragleave', function(){ this.classList.remove('drag-over'); });
+                    row.addEventListener('drop', function(e){
+                        e.preventDefault(); this.classList.remove('drag-over');
+                        if(!dragged || dragged===this) return;
+                        const all = Array.from(tbody.querySelectorAll('tr.abspl-order-row'));
+                        const di = all.indexOf(dragged); const ti = all.indexOf(this);
+                        if(di < ti) this.parentNode.insertBefore(dragged, this.nextSibling);
+                        else this.parentNode.insertBefore(dragged, this);
+                        syncState();
+                    });
+                });
+                syncState();
+            }, 100);
+        })();
+        """
+        display(Javascript(js_code))
 
     def _with_all_option(self, values):
         return [("All", "__all__")] + [(str(v), v) for v in values]
@@ -239,8 +374,8 @@ class AbsPLGUIComponents:
                 opt_a.value = "combined"
                 opt_b.options = [("Sample", "sample_id"), ("Condition", "condition"), ("Batch", "batch"), ("Spot size", "laser_spot_size")]
                 opt_b.value = "condition"
-                opt_c.options = [("Auto", "auto"), ("Flux density", "luminescence_flux_density"), ("Raw counts", "raw_spectrum_counts")]
-                opt_c.value = "raw_spectrum_counts"
+                opt_c.options = [("Flux density", "luminescence_flux_density")]
+                opt_c.value = "luminescence_flux_density"
             elif kind.value == "LuQY vs Laser Intensity":
                 include_sweep.layout.display = "none"
                 fit_enabled.layout.display = "flex"
@@ -270,6 +405,27 @@ class AbsPLGUIComponents:
 
     def _clear_plot_rows(self, _):
         self.plot_rows = []
+        self._render_plot_rows()
+
+    def _load_preset(self, _):
+        """Load selected preset"""
+        selected_preset = self.preset_dropdown.value
+        self.plot_rows = []
+        
+        if selected_preset in self.plot_presets:
+            for plot_type, option_a, option_b in self.plot_presets[selected_preset]:
+                self._add_plot_row(None)
+                # Set the values for the new row
+                if self.plot_rows:
+                    row = self.plot_rows[-1]
+                    row["kind"].value = plot_type
+                    if option_a and any(val == option_a for _, val in row["a"].options):
+                        row["a"].value = option_a
+                    if option_b and any(val == option_b for _, val in row["b"].options):
+                        row["b"].value = option_b
+        else:
+            self._add_plot_row(None)
+        
         self._render_plot_rows()
 
     def _render_plot_rows(self):
@@ -319,6 +475,8 @@ class AbsPLGUIComponents:
         if not self.selection_rows:
             self._add_selection_row(None)
 
+        self._update_trace_order_widget(options.get("samples", []))
+
         for row in self.plot_rows:
             try:
                 row["kind"].value = row["kind"].value
@@ -353,6 +511,14 @@ class AbsPLGUIComponents:
                 return None
 
         specs = []
+        trace_order = []
+        try:
+            parsed = json.loads(self.trace_order_state.value or "[]")
+            if isinstance(parsed, list):
+                trace_order = [str(v) for v in parsed]
+        except Exception:
+            trace_order = []
+
         for row in self.plot_rows:
             plot_type_value = row["kind"].value
             include_sweep_pl = plot_type_value == "PL + PL (sweep ~1 sun)"
@@ -373,6 +539,220 @@ class AbsPLGUIComponents:
                     "fit_enabled": bool(row["fit_enabled"].value),
                     "fit_min": _parse_optional_float(row["fit_min"].value),
                     "fit_max": _parse_optional_float(row["fit_max"].value),
+                    "color_scheme": self.color_selector.selected_scheme,
+                    "color_sampling": self.color_selector.sampling_dropdown.value,
+                    "color_count": int(self.color_selector.num_colors_slider.value),
+                    "trace_order": trace_order,
                 }
             )
         return specs
+
+
+class ColorSchemeSelector:
+    """Color scheme selector with preview"""
+    
+    def __init__(self):
+        self.color_schemes = {
+            'Viridis': px.colors.sequential.Viridis,
+            'Plasma': px.colors.sequential.Plasma,
+            'Inferno': px.colors.sequential.Inferno,
+            'Magma': px.colors.sequential.Magma,
+            'Blues': px.colors.sequential.Blues,
+            'Reds': px.colors.sequential.Reds,
+            'Greens': px.colors.sequential.Greens,
+            'Plotly': px.colors.qualitative.Plotly,
+            'D3': px.colors.qualitative.D3,
+            'Set1': px.colors.qualitative.Set1,
+            'Set2': px.colors.qualitative.Set2,
+            'Default (old)': [
+                'rgba(93, 164, 214, 0.7)', 'rgba(255, 144, 14, 0.7)', 
+                'rgba(44, 160, 101, 0.7)', 'rgba(255, 65, 54, 0.7)', 
+                'rgba(207, 114, 255, 0.7)', 'rgba(127, 96, 0, 0.7)',
+                'rgba(255, 140, 184, 0.7)', 'rgba(79, 90, 117, 0.7)'
+            ]
+        }
+        
+        self.selected_scheme = 'Viridis'
+        self.num_colors = 8
+        self._create_widgets()
+    
+    def _create_widgets(self):
+        """Create color scheme selector widgets"""
+        self.color_dropdown = widgets.Dropdown(
+            options=list(self.color_schemes.keys()),
+            value=self.selected_scheme,
+            description='Color Scheme:',
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(width='300px')
+        )
+
+        self.sampling_dropdown = widgets.Dropdown(
+            options=['sequential', 'even'],
+            value='sequential',
+            description='Sampling:',
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(width='200px')
+        )
+        
+        self.num_colors_slider = widgets.IntSlider(
+            value=8,
+            min=2,
+            max=20,
+            step=1,
+            description='# Colors:',
+            style={'description_width': 'initial'},
+            layout=widgets.Layout(width='300px')
+        )
+        
+        self.preview_output = widgets.Output(
+            layout=widgets.Layout(width='400px', height='60px', border='1px solid #ccc')
+        )
+        
+        self.color_dropdown.observe(self._on_color_change, names='value')
+        self.sampling_dropdown.observe(self._on_sampling_change, names='value')
+        self.num_colors_slider.observe(self._on_num_colors_change, names='value')
+        
+        self._update_preview()
+        
+        self.widget = widgets.VBox([
+            widgets.HBox([self.color_dropdown, self.sampling_dropdown]),
+            self.num_colors_slider,
+            self.preview_output
+        ])
+
+    def _on_sampling_change(self, change):
+        self._update_preview()
+    
+    def _on_color_change(self, change):
+        self.selected_scheme = change['new']
+        self._update_preview()
+    
+    def _on_num_colors_change(self, change):
+        """Handle number of colors change"""
+        self.num_colors = change['new']
+        self._update_preview()
+    
+    def _update_preview(self):
+        with self.preview_output:
+            clear_output(wait=True)
+            
+            colors = self.get_colors(num_colors=self.num_colors, sampling=self.sampling_dropdown.value)
+            
+            if self.sampling_dropdown.value == 'even':
+                sampling_text = "Even Sampling"
+            else:
+                sampling_text = "Continuous Gradient"
+            
+            html_preview = '<div style="display: flex; flex-direction: column; padding: 5px;">'
+            html_preview += f'<span style="margin-bottom: 5px; font-weight: bold;">{self.selected_scheme} ({sampling_text}): {len(colors)} colors</span>'
+            html_preview += '<div style="display: flex; flex-wrap: wrap;">'
+            
+            for color in colors:
+                html_preview += f'<span style="background-color: {color}; width: 30px; height: 30px; display: inline-block; margin: 2px; border: 1px solid #333; border-radius: 3px;"></span>'
+            
+            html_preview += '</div></div>'
+            
+            display(HTML(html_preview))
+    
+    def _interpolate_color(self, hex_color1, hex_color2, factor):
+        """Interpolate between two colors"""
+        def hex_to_rgb(color):
+            if isinstance(color, str):
+                if color.startswith('rgba'):
+                    import re
+                    match = re.match(r'rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)', color)
+                    if match:
+                        r, g, b, a = match.groups()
+                        return (int(r) / 255.0, int(g) / 255.0, int(b) / 255.0)
+                
+                color = color.lstrip('#')
+                if len(color) >= 6:
+                    return tuple(int(color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+            
+            return (0.5, 0.5, 0.5)
+        
+        def rgb_to_hex(r, g, b):
+            return '#{:02x}{:02x}{:02x}'.format(int(r*255), int(g*255), int(b*255))
+        
+        rgb1 = hex_to_rgb(hex_color1)
+        rgb2 = hex_to_rgb(hex_color2)
+        
+        r = rgb1[0] + (rgb2[0] - rgb1[0]) * factor
+        g = rgb1[1] + (rgb2[1] - rgb1[1]) * factor
+        b = rgb1[2] + (rgb2[2] - rgb1[2]) * factor
+        
+        return rgb_to_hex(r, g, b)
+    
+    def _ensure_hex_format(self, color):
+        """Convert color to hex format"""
+        if isinstance(color, str):
+            if color.startswith('#'):
+                return color
+            
+            if color.startswith('rgba'):
+                import re
+                match = re.match(r'rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)', color)
+                if match:
+                    r, g, b, a = match.groups()
+                    return '#{:02x}{:02x}{:02x}'.format(int(r), int(g), int(b))
+        
+        return '#808080'
+    
+    def _generate_continuous_colors(self, num_colors):
+        """Generate smooth color gradient from continuous palette"""
+        base_palette = self.color_schemes[self.selected_scheme]
+        
+        if num_colors <= len(base_palette):
+            step = (len(base_palette) - 1) / (num_colors - 1) if num_colors > 1 else 0
+            selected_colors = [base_palette[int(i * step)] for i in range(num_colors)]
+            return [self._ensure_hex_format(color) for color in selected_colors]
+        else:
+            colors = []
+            
+            for i in range(num_colors):
+                position = i / (num_colors - 1) if num_colors > 1 else 0
+                palette_index = position * (len(base_palette) - 1)
+                lower_index = int(palette_index)
+                upper_index = min(lower_index + 1, len(base_palette) - 1)
+                factor = palette_index - lower_index
+                
+                color1 = base_palette[lower_index]
+                color2 = base_palette[upper_index]
+                
+                if factor == 0 or lower_index == upper_index:
+                    interpolated = self._ensure_hex_format(color1)
+                else:
+                    interpolated = self._interpolate_color(color1, color2, factor)
+                
+                colors.append(interpolated)
+            
+            return colors
+    
+    def get_colors(self, num_colors=None, sampling='sequential'):
+        """Get colors from selected scheme"""
+        if num_colors is None:
+            num_colors = self.num_colors
+        
+        colors = self.color_schemes[self.selected_scheme]
+        
+        if sampling == 'even' and len(colors) > num_colors:
+            if num_colors == 1:
+                return [colors[len(colors)//2]]
+            
+            indices = []
+            for i in range(num_colors):
+                index = int(round(i * (len(colors) - 1) / (num_colors - 1)))
+                indices.append(index)
+            
+            return [colors[i] for i in indices]
+        else:
+            return self._generate_continuous_colors(num_colors)
+
+    def set_num_colors(self, num_colors):
+        """Set the number of colors to generate"""
+        num_colors = max(2, min(20, num_colors))
+        self.num_colors_slider.value = num_colors
+
+    def get_widget(self):
+        """Get the color scheme selector widget"""
+        return self.widget

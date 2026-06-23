@@ -5,6 +5,7 @@ Data manager for AbsPL/PLQY analysis.
 import os
 import sys
 import pandas as pd
+import re
 
 parent_dir = os.path.dirname(os.getcwd())
 if parent_dir not in sys.path:
@@ -12,6 +13,38 @@ if parent_dir not in sys.path:
 
 from api_calls import get_ids_in_batch, get_sample_description, get_all_eqe
 from diagnostic_helper_abspl import debug_logger_abspl
+
+
+def extract_cycle_info(*texts):
+    """Extract cycle identifier from description/filename text.
+    
+    Supports: Cycle_M, pxNCycle_M, or standalone cycle number.
+    Returns: cycle_number (int or None)
+    """
+    combined_pattern = re.compile(r'px(?:\d+)?Cycle_(?P<cycle>\d+)', re.IGNORECASE)
+    cycle_pattern = re.compile(r'Cycle_(?P<cycle>\d+)', re.IGNORECASE)
+    
+    cycle_number = None
+    
+    for text in texts:
+        if not text:
+            continue
+        
+        text_str = str(text)
+        
+        # Try combined pattern first
+        combined_match = combined_pattern.search(text_str)
+        if combined_match and cycle_number is None:
+            cycle_number = int(combined_match.group('cycle'))
+            continue
+        
+        # Try standalone cycle pattern
+        if cycle_number is None:
+            cycle_match = cycle_pattern.search(text_str)
+            if cycle_match:
+                cycle_number = int(cycle_match.group('cycle'))
+    
+    return cycle_number
 
 
 class AbsPLDataManager:
@@ -114,10 +147,19 @@ class AbsPLDataManager:
                 laser_intensity_default = settings.get("laser_intensity_suns", None)
 
                 for i, result in enumerate(results):
-                    cycle_number = result.get("cycle_number", i + 1)
+                    # Extract cycle number from metadata first, fallback to result data
+                    cycle_from_metadata = extract_cycle_info(entry_name, upload_name, sample_desc)
+                    cycle_number = cycle_from_metadata if cycle_from_metadata is not None else result.get("cycle_number", i + 1)
+                    
                     wavelength = self._as_list(result.get("wavelength"))
                     lum_flux = self._as_list(result.get("luminescence_flux_density"))
                     raw_spec = self._as_list(result.get("raw_spectrum_counts"))
+
+                    # Sweep data is stored in raw counts by source, but we expose it as flux-density channel
+                    # to keep one unified plotting source for sweep traces.
+                    if measurement_type == "sweep" and len(lum_flux) == 0 and len(raw_spec) > 0:
+                        lum_flux = raw_spec
+
                     intensity = lum_flux if len(lum_flux) > 0 else raw_spec
                     y_source = "luminescence_flux_density" if len(lum_flux) > 0 else "raw_spectrum_counts"
 

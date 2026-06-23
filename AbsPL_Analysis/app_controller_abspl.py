@@ -171,6 +171,10 @@ class AbsPLAppController:
                 color_by=a or "sample_id",
                 y_source=b or "auto",
                 include_nearest_sweep=bool(spec.get("include_sweep_pl", False)),
+                color_scheme=spec.get("color_scheme", "Viridis"),
+                color_sampling=spec.get("color_sampling", "sequential"),
+                color_count=spec.get("color_count", 8),
+                trace_order=spec.get("trace_order", None),
             )
 
         if ptype == "Sweep":
@@ -179,8 +183,12 @@ class AbsPLAppController:
                 measurement_type="sweep",
                 group_mode=a or "combined",
                 color_by=b or "sample_id",
-                y_source=c or "raw_spectrum_counts",
+                y_source=c or "luminescence_flux_density",
                 title="Sweep Spectra",
+                color_scheme=spec.get("color_scheme", "Viridis"),
+                color_sampling=spec.get("color_sampling", "sequential"),
+                color_count=spec.get("color_count", 8),
+                trace_order=spec.get("trace_order", None),
             )
 
         if ptype == "LuQY vs Laser Intensity":
@@ -195,6 +203,10 @@ class AbsPLAppController:
                 fit_min=spec.get("fit_min", None),
                 fit_max=spec.get("fit_max", None),
                 measurement_type="sweep",
+                color_scheme=spec.get("color_scheme", "Viridis"),
+                color_sampling=spec.get("color_sampling", "sequential"),
+                color_count=spec.get("color_count", 8),
+                trace_order=spec.get("trace_order", None),
             )
 
         return None

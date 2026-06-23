@@ -70,6 +70,44 @@ class AbsPLPlotManager:
             return "Unknown"
         return str(value)
 
+    def _ordered_values(self, values, preferred_order=None):
+        items = [str(v) for v in values]
+        if not preferred_order:
+            return items
+        seen = set(items)
+        ordered = [str(v) for v in preferred_order if str(v) in seen]
+        remaining = [v for v in items if v not in ordered]
+        return ordered + remaining
+
+    def _palette_dict(self):
+        return {
+            "Viridis": px.colors.sequential.Viridis,
+            "Plasma": px.colors.sequential.Plasma,
+            "Inferno": px.colors.sequential.Inferno,
+            "Magma": px.colors.sequential.Magma,
+            "Blues": px.colors.sequential.Blues,
+            "Reds": px.colors.sequential.Reds,
+            "Greens": px.colors.sequential.Greens,
+            "Plotly": px.colors.qualitative.Plotly,
+            "D3": px.colors.qualitative.D3,
+            "Set1": px.colors.qualitative.Set1,
+            "Set2": px.colors.qualitative.Set2,
+        }
+
+    def _generate_palette(self, scheme="Viridis", n=8, sampling="sequential"):
+        palettes = self._palette_dict()
+        base = palettes.get(scheme, px.colors.sequential.Viridis)
+        n = max(1, int(n or 8))
+        if n <= len(base):
+            if sampling == "even" and n > 1:
+                idxs = [int(round(i * (len(base) - 1) / (n - 1))) for i in range(n)]
+                return [base[i] for i in idxs]
+            return [base[i % len(base)] for i in range(n)]
+
+        if len(base) > 1:
+            return px.colors.sample_colorscale(base, [i / (n - 1) for i in range(n)])
+        return [base[0] for _ in range(n)]
+
     def _split_groups(self, df, group_mode="combined"):
         if group_mode == "per_sample":
             if "sample_id" not in df.columns:
@@ -114,7 +152,7 @@ class AbsPLPlotManager:
         merged = pd.concat(selected, ignore_index=False)
         return merged.drop(columns=["_laser", "_dist"], errors="ignore")
 
-    def pl_plot(self, spectra_df, color_by="sample_id", y_source="auto", include_nearest_sweep=True):
+    def pl_plot(self, spectra_df, color_by="sample_id", y_source="auto", include_nearest_sweep=True, color_scheme="Viridis", color_sampling="sequential", color_count=8, trace_order=None):
         if spectra_df is None or spectra_df.empty:
             return self._apply_layout(go.Figure(), "No data", "Wavelength (nm)", "Intensity")
 
@@ -143,9 +181,13 @@ class AbsPLPlotManager:
             normalize=False,
             log_y=False,
             y_source=y_source,
+            color_scheme=color_scheme,
+            color_sampling=color_sampling,
+            color_count=color_count,
+            trace_order=trace_order,
         )
 
-    def _make_spectrum_figure(self, df, title, y_title, color_by="sample_id", normalize=False, log_y=False, y_source="auto", show_laser_intensity=False):
+    def _make_spectrum_figure(self, df, title, y_title, color_by="sample_id", normalize=False, log_y=False, y_source="auto", show_laser_intensity=False, color_scheme="Viridis", color_sampling="sequential", color_count=8, trace_order=None):
         fig = go.Figure()
         if df is None or df.empty:
             return self._apply_layout(go.Figure(), title, "Wavelength (nm)", y_title)
@@ -157,11 +199,23 @@ class AbsPLPlotManager:
             categories = ["All"]
         else:
             categories = df[color_by].fillna("Unknown").astype(str).unique().tolist()
+            categories = self._ordered_values(categories, trace_order)
 
-        colors = px.colors.qualitative.Plotly
+        colors = self._generate_palette(color_scheme, max(color_count, len(categories), 8), color_sampling)
         color_map = {c: colors[i % len(colors)] for i, c in enumerate(categories)}
 
-        for _, row in df.iterrows():
+        # Special sweep behavior: if all traces share one color-by value, color traces by intensity.
+        use_intensity_palette = False
+        single_group_name = None
+        if show_laser_intensity and len(categories) == 1 and len(df) > 1:
+            use_intensity_palette = True
+            single_group_name = categories[0]
+            df = df.copy()
+            df["_laser_order"] = pd.to_numeric(df.get("laser_intensity_suns"), errors="coerce")
+            df = df.sort_values("_laser_order", na_position="last")
+            intensity_colors = self._generate_palette(color_scheme, max(len(df), 3), color_sampling)
+
+        for row_idx, (_, row) in enumerate(df.iterrows()):
             x = row.get("wavelength", None)
             y = self._get_spectrum_source(row, y_source=y_source)
             if not isinstance(x, list) or not isinstance(y, list):
@@ -191,25 +245,30 @@ class AbsPLPlotManager:
                     continue
 
             color_value = self._resolve_color_value(row, color_by) if color_by is not None else "All"
-            sample = str(row.get("sample_id", "?"))
-            cycle = row.get("cycle_number", "?")
-            mtype = str(row.get("measurement_type", "unknown"))
             laser_intensity = pd.to_numeric(row.get("laser_intensity_suns"), errors="coerce")
+            
             if show_laser_intensity and np.isfinite(laser_intensity):
-                trace_name = f"{color_value} | S:{sample} | C:{cycle} | {mtype} | I:{laser_intensity:.4g} sun"
+                trace_name = f"{laser_intensity:.4g} sun" if use_intensity_palette else f"{color_value}"
                 hover_extra = f"<br>Laser intensity: {laser_intensity:.4g} sun"
             else:
-                trace_name = f"{color_value} | S:{sample} | C:{cycle} | {mtype}"
+                trace_name = f"{color_value}"
                 hover_extra = ""
+
+            line_color = color_map.get(color_value, colors[0])
+            legend_group_title = None
+            if use_intensity_palette:
+                line_color = intensity_colors[row_idx % len(intensity_colors)]
+                legend_group_title = f"{color_by}: {single_group_name}" if color_by is not None else ""
 
             fig.add_trace(
                 go.Scatter(
                     x=x.tolist(),
                     y=y.tolist(),
                     mode="lines",
-                    line=dict(width=2, color=color_map.get(color_value, colors[0])),
+                    line=dict(width=2, color=line_color),
                     name=trace_name,
-                    legendgroup=color_value,
+                    legendgroup=("sweep_single_group" if use_intensity_palette else color_value),
+                    legendgrouptitle_text=legend_group_title if use_intensity_palette and row_idx == 0 else None,
                     showlegend=True,
                     hovertemplate=(
                         "<b>%{fullData.name}</b><br>"
@@ -225,8 +284,11 @@ class AbsPLPlotManager:
             fig.update_yaxes(type="log")
         return fig
 
-    def spectra_overlay(self, df, measurement_type=None, group_mode="combined", color_by="sample_id", normalize=False, log_y=False, y_source="auto", title=None):
-        """Plot PL or sweep spectra either combined or one figure per sample."""
+    def spectra_overlay(self, df, measurement_type=None, group_mode="combined", color_by="sample_id", normalize=False, log_y=False, y_source="auto", title=None, color_scheme="Viridis", color_sampling="sequential", color_count=8, trace_order=None):
+        """Plot PL or sweep spectra either combined or one figure per sample.
+        
+        For sweep measurements, always uses luminescence_flux_density.
+        """
         if df is None or df.empty:
             empty_title = title or "No data"
             return self._apply_layout(go.Figure(), empty_title, "Wavelength (nm)", "Intensity")
@@ -238,6 +300,10 @@ class AbsPLPlotManager:
         if working_df.empty:
             empty_title = title or f"No {measurement_type or 'spectral'} data available"
             return self._apply_layout(go.Figure(), empty_title, "Wavelength (nm)", "Intensity")
+
+        # For sweeps, force flux density source
+        if measurement_type == "sweep":
+            y_source = "luminescence_flux_density"
 
         groups = self._split_groups(working_df, group_mode=group_mode)
         figures = []
@@ -256,6 +322,10 @@ class AbsPLPlotManager:
                 log_y=log_y,
                 y_source=y_source,
                 show_laser_intensity=(measurement_type == "sweep"),
+                color_scheme=color_scheme,
+                color_sampling=color_sampling,
+                color_count=color_count,
+                trace_order=trace_order,
             )
             figures.append(fig)
             slug = group_name.replace(" ", "_").replace("/", "_") if group_name else "combined"
@@ -324,35 +394,51 @@ class AbsPLPlotManager:
 
         return self._apply_layout(fig, "Average Spectra by Group", "Wavelength (nm)", "Intensity")
 
-    def plqy_intensity_plot(self, df, y_col="luminescence_quantum_yield", group_mode="combined", color_by="sample_id", log_x=False, title=None, fit_enabled=False, fit_min=None, fit_max=None, measurement_type=None):
-        """Plot PLQY/LuQY versus excitation intensity."""
+    def plqy_intensity_plot(self, df, y_col="luminescence_quantum_yield", group_mode="combined", color_by="sample_id", log_x=False, title=None, fit_enabled=False, fit_min=None, fit_max=None, measurement_type=None, color_scheme="Viridis", color_sampling="sequential", color_count=8, trace_order=None):
+        """Plot PLQY/LuQY versus excitation intensity.
+        
+        For PLQY, includes quality factor calculation: A = slope / (k_B * T)
+        where k_B = 8.617333262e-5 eV/K, T = 298.15 K (room temp)
+        """
         if df is None or df.empty:
             empty_title = title or "No data"
-            return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_col)
+            y_label = "PLQY (%)" if y_col == "luminescence_quantum_yield" else y_col
+            return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_label)
 
         working_df = df.copy()
         if measurement_type is not None and "measurement_type" in working_df.columns:
             working_df = working_df[working_df["measurement_type"].astype(str) == str(measurement_type)].copy()
             if working_df.empty:
                 empty_title = title or f"No {measurement_type} data"
-                return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_col)
+                y_label = "PLQY (%)" if y_col == "luminescence_quantum_yield" else y_col
+                return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_label)
 
         if y_col not in working_df.columns:
             empty_title = title or f"Missing column: {y_col}"
-            return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_col)
+            y_label = "PLQY (%)" if y_col == "luminescence_quantum_yield" else y_col
+            return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_label)
 
         working_df["_x"] = pd.to_numeric(working_df.get("laser_intensity_suns"), errors="coerce")
         working_df[y_col] = pd.to_numeric(working_df[y_col], errors="coerce")
         working_df = working_df.dropna(subset=["_x", y_col])
         if working_df.empty:
             empty_title = title or f"No valid values for {y_col}"
-            return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_col)
+            y_label = "PLQY (%)" if y_col == "luminescence_quantum_yield" else y_col
+            return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_label)
 
         groups = self._split_groups(working_df, group_mode=group_mode)
         figures = []
         names = []
         base_title = title or ("PLQY/LuQY vs Intensity" if y_col == "luminescence_quantum_yield" else f"{y_col} vs Intensity")
-        colors = px.colors.qualitative.Set2
+        colors = self._generate_palette(color_scheme, max(color_count, 8), color_sampling)
+        
+        # Y-axis label: use PLQY (%) for luminescence_quantum_yield, otherwise use column name
+        y_label = "PLQY (%)" if y_col == "luminescence_quantum_yield" else y_col
+        
+        # Boltzmann constant (eV/K) and room temperature (K)
+        K_B = 8.617333262e-5
+        T_KELVIN = 298.15
+        KBT = K_B * T_KELVIN  # ~0.0257 eV at room temp
 
         for idx, (group_name, group_df) in enumerate(groups):
             fig = go.Figure()
@@ -365,10 +451,12 @@ class AbsPLPlotManager:
                 group_values = ["All"]
             else:
                 group_values = group_df[color_by_effective].fillna("Unknown").astype(str).unique().tolist()
+                group_values = self._ordered_values(group_values, trace_order)
 
             color_map = {value: colors[i % len(colors)] for i, value in enumerate(group_values)}
 
             fit_color = "#111827"
+            group_quality_factors = []
 
             for value in group_values:
                 sub = group_df if color_by_effective is None else group_df[group_df[color_by_effective].fillna("Unknown").astype(str) == value]
@@ -471,6 +559,15 @@ class AbsPLPlotManager:
                         x_for_fit = np.log(x_fit_source) if log_x else x_fit_source
                         if np.all(np.isfinite(x_for_fit)) and np.nanstd(x_for_fit) > 0:
                             slope, intercept = np.polyfit(x_for_fit, y_fit_source, 1)
+                            
+                            # Calculate quality factor if this is PLQY
+                            quality_factor = None
+                            qf_text = ""
+                            if y_col == "luminescence_quantum_yield" and slope != 0:
+                                quality_factor = slope / KBT
+                                qf_text = f"<br>Quality Factor A: {quality_factor:.4f}"
+                                group_quality_factors.append((str(value), float(quality_factor)))
+                            
                             x_line = np.linspace(np.nanmin(x_fit_source), np.nanmax(x_fit_source), 120)
                             y_line = slope * (np.log(x_line) if log_x else x_line) + intercept
                             fit_name = f"{value} fit"
@@ -486,14 +583,20 @@ class AbsPLPlotManager:
                                     hovertemplate=(
                                         f"Fit for {value}<br>"
                                         f"Slope: {slope:.4f}<br>"
-                                        f"Intercept: {intercept:.4f}<extra></extra>"
+                                        f"Intercept: {intercept:.4f}"
+                                        f"{qf_text}<extra></extra>"
                                     ),
                                 )
                             )
 
-            fig = self._apply_layout(fig, base_title if group_mode == "combined" else f"{base_title} - {group_name}", "Laser Intensity (suns)", y_col)
+            fig = self._apply_layout(fig, base_title if group_mode == "combined" else f"{base_title} - {group_name}", "Laser Intensity (suns)", y_label)
+            if group_quality_factors:
+                qf_summary = ", ".join([f"{k}: {v:.2f}" for k, v in group_quality_factors[:4]])
+                fig.update_layout(title=dict(text=f"{fig.layout.title.text}<br><sup>Diodenqualitaetsfaktor A: {qf_summary}</sup>"))
             if log_x:
                 fig.update_xaxes(type="log")
+            else:
+                fig.update_xaxes(tickformat=".3f", exponentformat="none")
             figures.append(fig)
             slug = group_name.replace(" ", "_").replace("/", "_") if group_name else "combined"
             names.append(f"plqy_{slug}.html")
@@ -502,7 +605,7 @@ class AbsPLPlotManager:
             return figures[0]
         return figures, names
 
-    def sweep_heatmap(self, df, sample=None, intensity_source="raw_spectrum_counts"):
+    def sweep_heatmap(self, df, sample=None, intensity_source="luminescence_flux_density"):
         if df is None or df.empty:
             return self._apply_layout(go.Figure(), "No data", "Wavelength (nm)", "Cycle")
 
