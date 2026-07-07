@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from scipy.optimize import curve_fit
+from scipy.special import voigt_profile
 
 
 class AbsPLPlotManager:
@@ -94,15 +96,400 @@ class AbsPLPlotManager:
             "Set2": px.colors.qualitative.Set2,
         }
 
+    def _gaussian_model(self, x_values, amplitude, center, sigma, offset):
+        sigma = max(abs(float(sigma)), 1e-9)
+        return amplitude * np.exp(-0.5 * ((x_values - center) / sigma) ** 2) + offset
+
+    def _voigt_model(self, x_values, amplitude, center, sigma, gamma, offset):
+        sigma = max(abs(float(sigma)), 1e-9)
+        gamma = max(abs(float(gamma)), 1e-9)
+        return amplitude * voigt_profile(x_values - center, sigma, gamma) + offset
+
+    def _fit_window_from_peak(self, x_values, y_values, peak_index):
+        if len(x_values) < 5:
+            return 0, len(x_values) - 1
+
+        peak_height = float(y_values[peak_index])
+        baseline = float(np.nanmin(y_values))
+        half_level = baseline + 0.5 * (peak_height - baseline)
+
+        left = peak_index
+        while left > 0 and y_values[left] > half_level:
+            left -= 1
+
+        right = peak_index
+        while right < len(y_values) - 1 and y_values[right] > half_level:
+            right += 1
+
+        width = max(right - left, 6)
+        pad = max(4, width)
+        return max(0, peak_index - pad), min(len(x_values) - 1, peak_index + pad)
+
+    def _fit_peak_profile(self, x_values, y_values, fit_model="gaussian", fit_mode="auto", fit_min=None, fit_max=None):
+        x_arr = np.asarray(x_values, dtype=float)
+        y_arr = np.asarray(y_values, dtype=float)
+        valid = np.isfinite(x_arr) & np.isfinite(y_arr)
+        x_arr = x_arr[valid]
+        y_arr = y_arr[valid]
+        if x_arr.size < 5:
+            return None
+
+        if fit_min is not None or fit_max is not None:
+            mask = np.ones_like(x_arr, dtype=bool)
+            if fit_min is not None:
+                mask &= x_arr >= float(fit_min)
+            if fit_max is not None:
+                mask &= x_arr <= float(fit_max)
+            x_fit = x_arr[mask]
+            y_fit = y_arr[mask]
+            if x_fit.size < 5:
+                return None
+            peak_index = int(np.nanargmax(y_fit))
+        else:
+            peak_index_full = int(np.nanargmax(y_arr))
+            left, right = self._fit_window_from_peak(x_arr, y_arr, peak_index_full)
+            x_fit = x_arr[left : right + 1]
+            y_fit = y_arr[left : right + 1]
+            peak_index = int(np.nanargmax(y_fit))
+
+        center_guess = float(x_fit[peak_index])
+        offset_guess = float(np.nanmin(y_fit))
+        height_guess = max(float(np.nanmax(y_fit) - offset_guess), 1e-9)
+        width_guess = max((float(np.nanmax(x_fit)) - float(np.nanmin(x_fit))) / 6.0, 1e-3)
+
+        try:
+            if str(fit_model).lower() == "voigt":
+                popt, _ = curve_fit(
+                    self._voigt_model,
+                    x_fit,
+                    y_fit,
+                    p0=[height_guess, center_guess, width_guess, width_guess, offset_guess],
+                    maxfev=10000,
+                )
+                y_line = self._voigt_model(x_fit, *popt)
+                sigma = abs(float(popt[2]))
+                gamma = abs(float(popt[3]))
+                fwhm = 0.5346 * (2 * gamma) + math.sqrt(0.2166 * (2 * gamma) ** 2 + (2.35482 * sigma) ** 2)
+                return {
+                    "model": "Voigt",
+                    "center": float(popt[1]),
+                    "fwhm": float(fwhm),
+                    "x_fit": x_fit,
+                    "y_fit": y_line,
+                    "fit_min": float(np.nanmin(x_fit)),
+                    "fit_max": float(np.nanmax(x_fit)),
+                }
+
+            popt, _ = curve_fit(
+                self._gaussian_model,
+                x_fit,
+                y_fit,
+                p0=[height_guess, center_guess, width_guess, offset_guess],
+                maxfev=10000,
+            )
+            y_line = self._gaussian_model(x_fit, *popt)
+            sigma = abs(float(popt[2]))
+            return {
+                "model": "Gaussian",
+                "center": float(popt[1]),
+                "fwhm": float(2.35482 * sigma),
+                "x_fit": x_fit,
+                "y_fit": y_line,
+                "fit_min": float(np.nanmin(x_fit)),
+                "fit_max": float(np.nanmax(x_fit)),
+            }
+        except Exception:
+            return None
+
+    def _quality_factor_from_qfls_slope(self, slope_value):
+        k_b = 8.617333262e-5
+        temperature_kelvin = 298.15
+        kbt = k_b * temperature_kelvin
+        if slope_value is None:
+            return None
+        return float(slope_value) / kbt
+
+    def _resolve_fit_range(self, fit_curve_ranges, curve_keys, default_min=None, default_max=None):
+        fit_min_local = default_min
+        fit_max_local = default_max
+        if not isinstance(fit_curve_ranges, dict):
+            return fit_min_local, fit_max_local
+
+        for key in curve_keys:
+            if key is None:
+                continue
+            cfg = fit_curve_ranges.get(str(key))
+            if not isinstance(cfg, dict):
+                continue
+            if cfg.get("fit_min", None) is not None:
+                fit_min_local = cfg.get("fit_min")
+            if cfg.get("fit_max", None) is not None:
+                fit_max_local = cfg.get("fit_max")
+            break
+        return fit_min_local, fit_max_local
+
+    def _scalar_intensity_plot(self, df, y_col, group_mode="combined", color_by="sample_id", log_x=False, title=None, fit_enabled=False, fit_min=None, fit_max=None, measurement_type=None, color_scheme="Viridis", color_sampling="sequential", color_count=8, trace_order=None, fit_quality_factor=False):
+        if df is None or df.empty:
+            return self._apply_layout(go.Figure(), title or "No data", "Laser Intensity (suns)", y_col)
+
+        working_df = df.copy()
+        if measurement_type is not None and "measurement_type" in working_df.columns:
+            working_df = working_df[working_df["measurement_type"].astype(str) == str(measurement_type)].copy()
+        if working_df.empty or y_col not in working_df.columns:
+            return self._apply_layout(go.Figure(), title or "No data", "Laser Intensity (suns)", y_col)
+
+        working_df["_x"] = pd.to_numeric(working_df.get("laser_intensity_suns"), errors="coerce")
+        working_df["_y"] = pd.to_numeric(working_df.get(y_col), errors="coerce")
+        working_df = working_df.dropna(subset=["_x", "_y"])
+        if working_df.empty:
+            return self._apply_layout(go.Figure(), title or "No valid values", "Laser Intensity (suns)", y_col)
+
+        groups = self._split_groups(working_df, group_mode=group_mode)
+        figures = []
+        names = []
+
+        for group_name, group_df in groups:
+            fig = go.Figure()
+            color_by_effective = color_by if color_by in group_df.columns else ("sample_id" if "sample_id" in group_df.columns else None)
+            group_values = ["All"] if color_by_effective is None else self._ordered_values(group_df[color_by_effective].fillna("Unknown").astype(str).unique().tolist(), trace_order)
+            colors = self._generate_palette(color_scheme, max(1, len(group_values)), color_sampling)
+            color_map = {value: colors[idx % len(colors)] for idx, value in enumerate(group_values)}
+
+            for value in group_values:
+                sub = group_df if color_by_effective is None else group_df[group_df[color_by_effective].fillna("Unknown").astype(str) == value]
+                sub = sub.sort_values("_x")
+                if sub.empty:
+                    continue
+                x_values = sub["_x"].to_numpy(dtype=float)
+                y_values = sub["_y"].to_numpy(dtype=float)
+                customdata = np.stack([
+                    sub.get("sample_id", pd.Series([""] * len(sub))).astype(str),
+                    sub.get("cycle_number", pd.Series([""] * len(sub))).astype(str),
+                    sub.get("measurement_type", pd.Series([""] * len(sub))).astype(str),
+                ], axis=-1)
+
+                base_name = str(value)
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_values.tolist(),
+                        y=y_values.tolist(),
+                        mode="lines+markers",
+                        name=base_name,
+                        legendgroup=base_name,
+                        line=dict(width=2, color=color_map.get(value, colors[0])),
+                        marker=dict(size=7, color=color_map.get(value, colors[0])),
+                        customdata=customdata,
+                        hovertemplate=(
+                            "<b>%{legendgroup}</b><br>"
+                            "Sample: %{customdata[0]}<br>"
+                            "Cycle: %{customdata[1]}<br>"
+                            "Type: %{customdata[2]}<br>"
+                            f"Intensity: %{{x:.4g}}<br>{y_col}: %{{y:.4g}}<extra></extra>"
+                        ),
+                    )
+                )
+                base_trace = fig.data[-1]
+
+                if fit_enabled and x_values.size >= 2 and y_values.size >= 2:
+                    fit_mask = np.isfinite(x_values) & np.isfinite(y_values)
+                    if fit_min is not None:
+                        fit_mask &= x_values >= float(fit_min)
+                    if fit_max is not None:
+                        fit_mask &= x_values <= float(fit_max)
+                    x_fit = x_values[fit_mask]
+                    y_fit = y_values[fit_mask]
+                    if x_fit.size >= 2:
+                        x_for_fit = np.log(x_fit) if log_x else x_fit
+                        if np.all(np.isfinite(x_for_fit)) and np.nanstd(x_for_fit) > 0:
+                            slope, intercept = np.polyfit(x_for_fit, y_fit, 1)
+                            x_line = np.linspace(np.nanmin(x_fit), np.nanmax(x_fit), 120)
+                            y_line = slope * (np.log(x_line) if log_x else x_line) + intercept
+                            qf_text = ""
+                            if fit_quality_factor and log_x:
+                                qf_value = self._quality_factor_from_qfls_slope(slope)
+                                if qf_value is not None:
+                                    base_trace.name = f"{base_name}, A={qf_value:.3f}"
+                                    qf_text = f"<br>Diode quality factor A: {qf_value:.4f}"
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=x_line.tolist(),
+                                    y=y_line.tolist(),
+                                    mode="lines",
+                                    name=f"{value} fit",
+                                    legendgroup=base_name,
+                                    showlegend=False,
+                                    line=dict(color=color_map.get(value, colors[0]), width=2, dash="dash"),
+                                    hovertemplate=(
+                                        f"Fit for {value}<br>Slope: {slope:.4f}<br>Intercept: {intercept:.4f}{qf_text}<extra></extra>"
+                                    ),
+                                )
+                            )
+
+            plot_title = title if group_mode == "combined" else f"{title} - {group_name}"
+            fig = self._apply_layout(fig, plot_title, "Laser Intensity (suns)", y_col)
+            if log_x:
+                fig.update_xaxes(type="log")
+            else:
+                fig.update_xaxes(tickformat=".3f", exponentformat="none")
+            figures.append(fig)
+            slug = group_name.replace(" ", "_").replace("/", "_") if group_name else "combined"
+            names.append(f"{y_col}_{slug}.html")
+
+        if len(figures) == 1:
+            return figures[0]
+        return figures, names
+
+    def qfls_intensity_plot(self, df, group_mode="combined", color_by="sample_id", log_x=False, title=None, fit_enabled=False, fit_min=None, fit_max=None, measurement_type=None, color_scheme="Viridis", color_sampling="sequential", color_count=8, trace_order=None):
+        return self._scalar_intensity_plot(
+            df,
+            y_col="quasi_fermi_level_splitting",
+            group_mode=group_mode,
+            color_by=color_by,
+            log_x=log_x,
+            title=title or "QFLS vs Laser Intensity",
+            fit_enabled=fit_enabled,
+            fit_min=fit_min,
+            fit_max=fit_max,
+            measurement_type=measurement_type,
+            color_scheme=color_scheme,
+            color_sampling=color_sampling,
+            color_count=color_count,
+            trace_order=trace_order,
+            fit_quality_factor=True,
+        )
+
+    def plqy_qfls_dual_axis_plot(self, df, group_mode="combined", color_by="sample_id", log_x=False, title=None, fit_enabled=False, fit_min=None, fit_max=None, measurement_type=None, color_scheme="Viridis", color_sampling="sequential", color_count=8, trace_order=None):
+        if df is None or df.empty:
+            return self._apply_layout(go.Figure(), title or "No data", "Laser Intensity (suns)", "PLQY (%)")
+
+        working_df = df.copy()
+        if measurement_type is not None and "measurement_type" in working_df.columns:
+            working_df = working_df[working_df["measurement_type"].astype(str) == str(measurement_type)].copy()
+        if working_df.empty:
+            return self._apply_layout(go.Figure(), title or "No data", "Laser Intensity (suns)", "PLQY (%)")
+
+        working_df["_x"] = pd.to_numeric(working_df.get("laser_intensity_suns"), errors="coerce")
+        working_df["_plqy"] = pd.to_numeric(working_df.get("luminescence_quantum_yield"), errors="coerce")
+        working_df["_qfls"] = pd.to_numeric(working_df.get("quasi_fermi_level_splitting"), errors="coerce")
+        working_df = working_df.dropna(subset=["_x"])
+        if working_df.empty:
+            return self._apply_layout(go.Figure(), title or "No valid values", "Laser Intensity (suns)", "PLQY (%)")
+
+        from plotly.subplots import make_subplots
+
+        groups = self._split_groups(working_df, group_mode=group_mode)
+        figures = []
+        names = []
+
+        for group_name, group_df in groups:
+            fig = make_subplots(specs=[[{"secondary_y": True}]])
+            color_by_effective = color_by if color_by in group_df.columns else ("sample_id" if "sample_id" in group_df.columns else None)
+            group_values = ["All"] if color_by_effective is None else self._ordered_values(group_df[color_by_effective].fillna("Unknown").astype(str).unique().tolist(), trace_order)
+            colors = self._generate_palette(color_scheme, max(1, len(group_values)), color_sampling)
+            color_map = {value: colors[idx % len(colors)] for idx, value in enumerate(group_values)}
+
+            for value in group_values:
+                sub = group_df if color_by_effective is None else group_df[group_df[color_by_effective].fillna("Unknown").astype(str) == value]
+                sub = sub.sort_values("_x")
+                if sub.empty:
+                    continue
+                x_values = sub["_x"].to_numpy(dtype=float)
+                plqy_values = sub["_plqy"].to_numpy(dtype=float)
+                qfls_values = sub["_qfls"].to_numpy(dtype=float)
+
+                valid_plqy = np.isfinite(x_values) & np.isfinite(plqy_values)
+                if np.any(valid_plqy):
+                    fig.add_trace(
+                        go.Scatter(
+                            x=x_values[valid_plqy].tolist(),
+                            y=plqy_values[valid_plqy].tolist(),
+                            mode="lines+markers",
+                            name=f"{value} PLQY",
+                            line=dict(width=2, color=color_map.get(value, colors[0])),
+                            marker=dict(size=6, color=color_map.get(value, colors[0])),
+                        ),
+                        secondary_y=False,
+                    )
+
+                valid_qfls = np.isfinite(x_values) & np.isfinite(qfls_values)
+                if np.any(valid_qfls):
+                    qfls_name = f"{value} QFLS"
+                    fig.add_trace(
+                        go.Scatter(
+                            x=x_values[valid_qfls].tolist(),
+                            y=qfls_values[valid_qfls].tolist(),
+                            mode="lines+markers",
+                            name=qfls_name,
+                            line=dict(width=2, color=color_map.get(value, colors[0]), dash="dot"),
+                            marker=dict(size=6, color=color_map.get(value, colors[0]), symbol="diamond"),
+                        ),
+                        secondary_y=True,
+                    )
+                    qfls_trace = fig.data[-1]
+
+                    if fit_enabled:
+                        fit_mask = valid_qfls.copy()
+                        if fit_min is not None:
+                            fit_mask &= x_values >= float(fit_min)
+                        if fit_max is not None:
+                            fit_mask &= x_values <= float(fit_max)
+                        x_fit = x_values[fit_mask]
+                        y_fit = qfls_values[fit_mask]
+                        if x_fit.size >= 2:
+                            x_for_fit = np.log(x_fit) if log_x else x_fit
+                            if np.all(np.isfinite(x_for_fit)) and np.nanstd(x_for_fit) > 0:
+                                slope, intercept = np.polyfit(x_for_fit, y_fit, 1)
+                                x_line = np.linspace(np.nanmin(x_fit), np.nanmax(x_fit), 120)
+                                y_line = slope * (np.log(x_line) if log_x else x_line) + intercept
+                                if log_x:
+                                    qf_value = self._quality_factor_from_qfls_slope(slope)
+                                    if qf_value is not None:
+                                        qfls_trace.name = f"{qfls_name}, A={qf_value:.3f}"
+                                fig.add_trace(
+                                    go.Scatter(
+                                        x=x_line.tolist(),
+                                        y=y_line.tolist(),
+                                        mode="lines",
+                                        name=f"{value} QFLS fit",
+                                        showlegend=False,
+                                        line=dict(color=color_map.get(value, colors[0]), width=2, dash="dash"),
+                                    ),
+                                    secondary_y=True,
+                                )
+
+            fig.update_layout(
+                title=dict(text=title if group_mode == "combined" else f"{title} - {group_name}", font=dict(size=self.font_size_title)),
+                template="plotly_white",
+                legend=dict(font=dict(size=self.font_size_legend)),
+                margin=dict(l=80, r=80, t=70, b=70),
+                width=1400,
+                height=850,
+            )
+            fig.update_xaxes(title_text="Laser Intensity (suns)", showgrid=True, gridwidth=1, gridcolor="#eaecf0", tickfont=dict(size=self.font_size_axis))
+            fig.update_yaxes(title_text="PLQY (%)", secondary_y=False, showgrid=True, gridwidth=1, gridcolor="#eaecf0", tickfont=dict(size=self.font_size_axis))
+            fig.update_yaxes(title_text="QFLS (eV)", secondary_y=True, tickfont=dict(size=self.font_size_axis))
+            if log_x:
+                fig.update_xaxes(type="log")
+            else:
+                fig.update_xaxes(tickformat=".3f", exponentformat="none")
+            figures.append(fig)
+            slug = group_name.replace(" ", "_").replace("/", "_") if group_name else "combined"
+            names.append(f"plqy_qfls_{slug}.html")
+
+        if len(figures) == 1:
+            return figures[0]
+        return figures, names
+
     def _generate_palette(self, scheme="Viridis", n=8, sampling="sequential"):
         palettes = self._palette_dict()
         base = palettes.get(scheme, px.colors.sequential.Viridis)
         n = max(1, int(n or 8))
         if n <= len(base):
-            if sampling == "even" and n > 1:
-                idxs = [int(round(i * (len(base) - 1) / (n - 1))) for i in range(n)]
-                return [base[i] for i in idxs]
-            return [base[i % len(base)] for i in range(n)]
+            if n == 1:
+                return [base[len(base) // 2]]
+            # Always spread colors across palette range so small-N plots are not clustered in one hue.
+            idxs = [int(round(i * (len(base) - 1) / (n - 1))) for i in range(n)]
+            return [base[i] for i in idxs]
 
         if len(base) > 1:
             return px.colors.sample_colorscale(base, [i / (n - 1) for i in range(n)])
@@ -152,7 +539,7 @@ class AbsPLPlotManager:
         merged = pd.concat(selected, ignore_index=False)
         return merged.drop(columns=["_laser", "_dist"], errors="ignore")
 
-    def pl_plot(self, spectra_df, color_by="sample_id", y_source="auto", include_nearest_sweep=True, color_scheme="Viridis", color_sampling="sequential", color_count=8, trace_order=None):
+    def pl_plot(self, spectra_df, color_by="sample_id", y_source="auto", include_nearest_sweep=True, color_scheme="Viridis", color_sampling="sequential", color_count=8, trace_order=None, fit_enabled=False, fit_model="gaussian", fit_mode="auto", fit_min=None, fit_max=None, fit_curve_ranges=None):
         if spectra_df is None or spectra_df.empty:
             return self._apply_layout(go.Figure(), "No data", "Wavelength (nm)", "Intensity")
 
@@ -185,9 +572,15 @@ class AbsPLPlotManager:
             color_sampling=color_sampling,
             color_count=color_count,
             trace_order=trace_order,
+            fit_enabled=fit_enabled,
+            fit_model=fit_model,
+            fit_mode=fit_mode,
+            fit_min=fit_min,
+            fit_max=fit_max,
+            fit_curve_ranges=fit_curve_ranges,
         )
 
-    def _make_spectrum_figure(self, df, title, y_title, color_by="sample_id", normalize=False, log_y=False, y_source="auto", show_laser_intensity=False, color_scheme="Viridis", color_sampling="sequential", color_count=8, trace_order=None):
+    def _make_spectrum_figure(self, df, title, y_title, color_by="sample_id", normalize=False, log_y=False, y_source="auto", show_laser_intensity=False, color_scheme="Viridis", color_sampling="sequential", color_count=8, trace_order=None, fit_enabled=False, fit_model="gaussian", fit_mode="auto", fit_min=None, fit_max=None, fit_curve_ranges=None):
         fig = go.Figure()
         if df is None or df.empty:
             return self._apply_layout(go.Figure(), title, "Wavelength (nm)", y_title)
@@ -201,10 +594,11 @@ class AbsPLPlotManager:
             categories = df[color_by].fillna("Unknown").astype(str).unique().tolist()
             categories = self._ordered_values(categories, trace_order)
 
-        colors = self._generate_palette(color_scheme, max(color_count, len(categories), 8), color_sampling)
+        colors = self._generate_palette(color_scheme, max(1, len(categories)), color_sampling)
         color_map = {c: colors[i % len(colors)] for i, c in enumerate(categories)}
 
         # Special sweep behavior: if all traces share one color-by value, color traces by intensity.
+        intensity_colors = []
         use_intensity_palette = False
         single_group_name = None
         if show_laser_intensity and len(categories) == 1 and len(df) > 1:
@@ -246,6 +640,7 @@ class AbsPLPlotManager:
 
             color_value = self._resolve_color_value(row, color_by) if color_by is not None else "All"
             laser_intensity = pd.to_numeric(row.get("laser_intensity_suns"), errors="coerce")
+            measurement_uid = row.get("measurement_uid", None)
             
             if show_laser_intensity and np.isfinite(laser_intensity):
                 trace_name = f"{laser_intensity:.4g} sun" if use_intensity_palette else f"{color_value}"
@@ -278,13 +673,73 @@ class AbsPLPlotManager:
                     ),
                 )
             )
+            base_trace = fig.data[-1]
+
+            if fit_enabled:
+                fit_min_local, fit_max_local = self._resolve_fit_range(
+                    fit_curve_ranges,
+                    [
+                        measurement_uid,
+                        trace_name,
+                        color_value,
+                        row.get("sample_id", None),
+                        row.get("condition", None),
+                        row.get("batch", None),
+                        row.get("laser_spot_size", None),
+                    ],
+                    default_min=fit_min,
+                    default_max=fit_max,
+                )
+                peak_fit = self._fit_peak_profile(
+                    x,
+                    y,
+                    fit_model=fit_model,
+                    fit_mode=fit_mode,
+                    fit_min=fit_min_local,
+                    fit_max=fit_max_local,
+                )
+                if peak_fit is not None:
+                    base_trace.name = f"{trace_name}, Peak = {peak_fit['center']:.2f} nm, FWHM = {peak_fit['fwhm']:.2f} nm"
+                    fit_label = f"{trace_name} {peak_fit['model']} fit"
+                    fig.add_trace(
+                        go.Scatter(
+                            x=peak_fit["x_fit"].tolist(),
+                            y=peak_fit["y_fit"].tolist(),
+                            mode="lines",
+                            name=fit_label,
+                            legendgroup=("sweep_single_group" if use_intensity_palette else color_value),
+                            showlegend=False,
+                            line=dict(color=line_color, width=2, dash="dash"),
+                            hovertemplate=(
+                                f"{peak_fit['model']} fit<br>"
+                                f"Peak position: {peak_fit['center']:.3f} nm<br>"
+                                f"FWHM: {peak_fit['fwhm']:.3f} nm<br>"
+                                f"Fit window: {peak_fit['fit_min']:.3f} - {peak_fit['fit_max']:.3f} nm<extra></extra>"
+                            ),
+                        )
+                    )
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[peak_fit["center"]],
+                            y=[float(np.interp(peak_fit["center"], peak_fit["x_fit"], peak_fit["y_fit"]))],
+                            mode="markers",
+                            name=f"{trace_name} peak",
+                            legendgroup=("sweep_single_group" if use_intensity_palette else color_value),
+                            showlegend=False,
+                            marker=dict(color=line_color, size=9, symbol="x"),
+                            hovertemplate=(
+                                f"Peak position: {peak_fit['center']:.3f} nm<br>"
+                                f"FWHM: {peak_fit['fwhm']:.3f} nm<extra></extra>"
+                            ),
+                        )
+                    )
 
         fig = self._apply_layout(fig, title, "Wavelength (nm)", y_title)
         if log_y:
             fig.update_yaxes(type="log")
         return fig
 
-    def spectra_overlay(self, df, measurement_type=None, group_mode="combined", color_by="sample_id", normalize=False, log_y=False, y_source="auto", title=None, color_scheme="Viridis", color_sampling="sequential", color_count=8, trace_order=None):
+    def spectra_overlay(self, df, measurement_type=None, group_mode="combined", color_by="sample_id", normalize=False, log_y=False, y_source="auto", title=None, color_scheme="Viridis", color_sampling="sequential", color_count=8, trace_order=None, fit_enabled=False, fit_model="gaussian", fit_mode="auto", fit_min=None, fit_max=None, fit_curve_ranges=None):
         """Plot PL or sweep spectra either combined or one figure per sample.
         
         For sweep measurements, always uses luminescence_flux_density.
@@ -326,6 +781,12 @@ class AbsPLPlotManager:
                 color_sampling=color_sampling,
                 color_count=color_count,
                 trace_order=trace_order,
+                fit_enabled=fit_enabled,
+                fit_model=fit_model,
+                fit_mode=fit_mode,
+                fit_min=fit_min,
+                fit_max=fit_max,
+                fit_curve_ranges=fit_curve_ranges,
             )
             figures.append(fig)
             slug = group_name.replace(" ", "_").replace("/", "_") if group_name else "combined"
@@ -395,215 +856,23 @@ class AbsPLPlotManager:
         return self._apply_layout(fig, "Average Spectra by Group", "Wavelength (nm)", "Intensity")
 
     def plqy_intensity_plot(self, df, y_col="luminescence_quantum_yield", group_mode="combined", color_by="sample_id", log_x=False, title=None, fit_enabled=False, fit_min=None, fit_max=None, measurement_type=None, color_scheme="Viridis", color_sampling="sequential", color_count=8, trace_order=None):
-        """Plot PLQY/LuQY versus excitation intensity.
-        
-        For PLQY, includes quality factor calculation: A = slope / (k_B * T)
-        where k_B = 8.617333262e-5 eV/K, T = 298.15 K (room temp)
-        """
-        if df is None or df.empty:
-            empty_title = title or "No data"
-            y_label = "PLQY (%)" if y_col == "luminescence_quantum_yield" else y_col
-            return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_label)
-
-        working_df = df.copy()
-        if measurement_type is not None and "measurement_type" in working_df.columns:
-            working_df = working_df[working_df["measurement_type"].astype(str) == str(measurement_type)].copy()
-            if working_df.empty:
-                empty_title = title or f"No {measurement_type} data"
-                y_label = "PLQY (%)" if y_col == "luminescence_quantum_yield" else y_col
-                return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_label)
-
-        if y_col not in working_df.columns:
-            empty_title = title or f"Missing column: {y_col}"
-            y_label = "PLQY (%)" if y_col == "luminescence_quantum_yield" else y_col
-            return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_label)
-
-        working_df["_x"] = pd.to_numeric(working_df.get("laser_intensity_suns"), errors="coerce")
-        working_df[y_col] = pd.to_numeric(working_df[y_col], errors="coerce")
-        working_df = working_df.dropna(subset=["_x", y_col])
-        if working_df.empty:
-            empty_title = title or f"No valid values for {y_col}"
-            y_label = "PLQY (%)" if y_col == "luminescence_quantum_yield" else y_col
-            return self._apply_layout(go.Figure(), empty_title, "Laser Intensity (suns)", y_label)
-
-        groups = self._split_groups(working_df, group_mode=group_mode)
-        figures = []
-        names = []
-        base_title = title or ("PLQY/LuQY vs Intensity" if y_col == "luminescence_quantum_yield" else f"{y_col} vs Intensity")
-        colors = self._generate_palette(color_scheme, max(color_count, 8), color_sampling)
-        
-        # Y-axis label: use PLQY (%) for luminescence_quantum_yield, otherwise use column name
-        y_label = "PLQY (%)" if y_col == "luminescence_quantum_yield" else y_col
-        
-        # Boltzmann constant (eV/K) and room temperature (K)
-        K_B = 8.617333262e-5
-        T_KELVIN = 298.15
-        KBT = K_B * T_KELVIN  # ~0.0257 eV at room temp
-
-        for idx, (group_name, group_df) in enumerate(groups):
-            fig = go.Figure()
-            if color_by not in group_df.columns:
-                color_by_effective = "sample_id" if "sample_id" in group_df.columns else ("condition" if "condition" in group_df.columns else None)
-            else:
-                color_by_effective = color_by
-
-            if color_by_effective is None:
-                group_values = ["All"]
-            else:
-                group_values = group_df[color_by_effective].fillna("Unknown").astype(str).unique().tolist()
-                group_values = self._ordered_values(group_values, trace_order)
-
-            color_map = {value: colors[i % len(colors)] for i, value in enumerate(group_values)}
-
-            fit_color = "#111827"
-            group_quality_factors = []
-
-            for value in group_values:
-                sub = group_df if color_by_effective is None else group_df[group_df[color_by_effective].fillna("Unknown").astype(str) == value]
-                if sub.empty:
-                    continue
-                sub = sub.sort_values("_x")
-                x_values = sub["_x"].to_numpy(dtype=float)
-                y_values = sub[y_col].to_numpy(dtype=float)
-                trace_customdata = np.stack([
-                    sub.get("sample_id", pd.Series([""] * len(sub))).astype(str),
-                    sub.get("cycle_number", pd.Series([""] * len(sub))).astype(str),
-                    sub.get("measurement_type", pd.Series([""] * len(sub))).astype(str),
-                ], axis=-1)
-
-                if fit_enabled:
-                    fit_mask = np.isfinite(x_values) & np.isfinite(y_values)
-                    if fit_min is not None:
-                        fit_mask &= x_values >= float(fit_min)
-                    if fit_max is not None:
-                        fit_mask &= x_values <= float(fit_max)
-
-                    fig.add_trace(
-                        go.Scatter(
-                            x=x_values.tolist(),
-                            y=y_values.tolist(),
-                            mode="lines",
-                            name=value,
-                            legendgroup=value,
-                            line=dict(width=2, color=color_map.get(value, colors[0])),
-                            showlegend=True,
-                            hoverinfo="skip",
-                        )
-                    )
-
-                    if np.any(fit_mask):
-                        fig.add_trace(
-                            go.Scatter(
-                                x=x_values[fit_mask].tolist(),
-                                y=y_values[fit_mask].tolist(),
-                                mode="markers",
-                                name=f"{value} (fit points)",
-                                legendgroup=f"{value}_fit_points",
-                                marker=dict(size=9, color=color_map.get(value, colors[0]), symbol="circle"),
-                                customdata=trace_customdata[fit_mask],
-                                hovertemplate=(
-                                    "<b>%{legendgroup}</b><br>"
-                                    "Sample: %{customdata[0]}<br>"
-                                    "Cycle: %{customdata[1]}<br>"
-                                    "Type: %{customdata[2]}<br>"
-                                    f"Intensity: %{{x:.4g}}<br>{y_col}: %{{y:.4g}}<extra></extra>"
-                                ),
-                            )
-                        )
-
-                    if np.any(~fit_mask):
-                        fig.add_trace(
-                            go.Scatter(
-                                x=x_values[~fit_mask].tolist(),
-                                y=y_values[~fit_mask].tolist(),
-                                mode="markers",
-                                name=f"{value} (outside fit)",
-                                legendgroup=f"{value}_outside_fit",
-                                marker=dict(size=8, color=color_map.get(value, colors[0]), symbol="circle-open", opacity=0.55),
-                                customdata=trace_customdata[~fit_mask],
-                                hovertemplate=(
-                                    "<b>%{legendgroup}</b><br>"
-                                    "Sample: %{customdata[0]}<br>"
-                                    "Cycle: %{customdata[1]}<br>"
-                                    "Type: %{customdata[2]}<br>"
-                                    f"Intensity: %{{x:.4g}}<br>{y_col}: %{{y:.4g}}<extra></extra>"
-                                ),
-                            )
-                        )
-                else:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=x_values.tolist(),
-                            y=y_values.tolist(),
-                            mode="lines+markers",
-                            name=value,
-                            legendgroup=value,
-                            marker=dict(size=7, color=color_map.get(value, colors[0])),
-                            line=dict(width=2, color=color_map.get(value, colors[0])),
-                            customdata=trace_customdata,
-                            hovertemplate=(
-                                "<b>%{legendgroup}</b><br>"
-                                "Sample: %{customdata[0]}<br>"
-                                "Cycle: %{customdata[1]}<br>"
-                                "Type: %{customdata[2]}<br>"
-                                f"Intensity: %{{x:.4g}}<br>{y_col}: %{{y:.4g}}<extra></extra>"
-                            ),
-                        )
-                    )
-
-                if fit_enabled:
-                    x_fit_source = x_values[fit_mask]
-                    y_fit_source = y_values[fit_mask]
-
-                    if x_fit_source.size >= 2 and y_fit_source.size >= 2:
-                        x_for_fit = np.log(x_fit_source) if log_x else x_fit_source
-                        if np.all(np.isfinite(x_for_fit)) and np.nanstd(x_for_fit) > 0:
-                            slope, intercept = np.polyfit(x_for_fit, y_fit_source, 1)
-                            
-                            # Calculate quality factor if this is PLQY
-                            quality_factor = None
-                            qf_text = ""
-                            if y_col == "luminescence_quantum_yield" and slope != 0:
-                                quality_factor = slope / KBT
-                                qf_text = f"<br>Quality Factor A: {quality_factor:.4f}"
-                                group_quality_factors.append((str(value), float(quality_factor)))
-                            
-                            x_line = np.linspace(np.nanmin(x_fit_source), np.nanmax(x_fit_source), 120)
-                            y_line = slope * (np.log(x_line) if log_x else x_line) + intercept
-                            fit_name = f"{value} fit"
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=x_line.tolist(),
-                                    y=y_line.tolist(),
-                                    mode="lines",
-                                    name=fit_name,
-                                    legendgroup=f"{value}_fit",
-                                    showlegend=True,
-                                    line=dict(color=fit_color, width=2, dash="dash"),
-                                    hovertemplate=(
-                                        f"Fit for {value}<br>"
-                                        f"Slope: {slope:.4f}<br>"
-                                        f"Intercept: {intercept:.4f}"
-                                        f"{qf_text}<extra></extra>"
-                                    ),
-                                )
-                            )
-
-            fig = self._apply_layout(fig, base_title if group_mode == "combined" else f"{base_title} - {group_name}", "Laser Intensity (suns)", y_label)
-            if group_quality_factors:
-                qf_summary = ", ".join([f"{k}: {v:.2f}" for k, v in group_quality_factors[:4]])
-                fig.update_layout(title=dict(text=f"{fig.layout.title.text}<br><sup>Diodenqualitaetsfaktor A: {qf_summary}</sup>"))
-            if log_x:
-                fig.update_xaxes(type="log")
-            else:
-                fig.update_xaxes(tickformat=".3f", exponentformat="none")
-            figures.append(fig)
-            slug = group_name.replace(" ", "_").replace("/", "_") if group_name else "combined"
-            names.append(f"plqy_{slug}.html")
-
-        if len(figures) == 1:
-            return figures[0]
-        return figures, names
+        return self._scalar_intensity_plot(
+            df,
+            y_col=y_col,
+            group_mode=group_mode,
+            color_by=color_by,
+            log_x=log_x,
+            title=title or "PLQY vs Laser Intensity",
+            fit_enabled=False,
+            fit_min=fit_min,
+            fit_max=fit_max,
+            measurement_type=measurement_type,
+            color_scheme=color_scheme,
+            color_sampling=color_sampling,
+            color_count=color_count,
+            trace_order=trace_order,
+            fit_quality_factor=False,
+        )
 
     def sweep_heatmap(self, df, sample=None, intensity_source="luminescence_flux_density"):
         if df is None or df.empty:

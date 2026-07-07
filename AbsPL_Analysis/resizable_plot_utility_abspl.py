@@ -398,7 +398,8 @@ class ResizablePlotManager:
             name = getattr(trace, 'name', None) or ''
             if not name or name in seen:
                 continue
-            if not getattr(trace, 'showlegend', True):
+            showlegend = getattr(trace, 'showlegend', None)
+            if showlegend is False:
                 continue
             seen.add(name)
             color = '#888'

@@ -6,6 +6,7 @@ import os
 import sys
 import pandas as pd
 import re
+import numpy as np
 
 parent_dir = os.path.dirname(os.getcwd())
 if parent_dir not in sys.path:
@@ -45,6 +46,25 @@ def extract_cycle_info(*texts):
                 cycle_number = int(cycle_match.group('cycle'))
     
     return cycle_number
+
+
+def extract_description_notes(data_dict, metadata):
+    """Extract description notes/comment text from entry payload and metadata."""
+    candidates = [
+        (metadata or {}).get("description_notes", ""),
+        (metadata or {}).get("comment", ""),
+        (metadata or {}).get("comments", ""),
+        (metadata or {}).get("description", ""),
+        (data_dict or {}).get("description_notes", ""),
+        (data_dict or {}).get("comment", ""),
+        (data_dict or {}).get("comments", ""),
+        (data_dict or {}).get("notes", ""),
+    ]
+
+    for candidate in candidates:
+        if candidate not in (None, ""):
+            return str(candidate)
+    return ""
 
 
 class AbsPLDataManager:
@@ -142,14 +162,15 @@ class AbsPLDataManager:
                 entry_name = data_dict.get("name", metadata.get("entry_name", f"entry_{entry_idx}"))
                 upload_name = metadata.get("upload_name", "unknown_upload")
                 spot_size = self._extract_spot_size(data_dict)
+                description_notes = extract_description_notes(data_dict, metadata)
+                cycle_from_notes = extract_cycle_info(description_notes)
 
                 settings = data_dict.get("settings", {}) if isinstance(data_dict, dict) else {}
                 laser_intensity_default = settings.get("laser_intensity_suns", None)
 
                 for i, result in enumerate(results):
-                    # Extract cycle number from metadata first, fallback to result data
-                    cycle_from_metadata = extract_cycle_info(entry_name, upload_name, sample_desc)
-                    cycle_number = cycle_from_metadata if cycle_from_metadata is not None else result.get("cycle_number", i + 1)
+                    # Cycle comes from Description Notes (e.g. "Cycle_N"), not from sweep sub-measurement index.
+                    cycle_number = cycle_from_notes
                     
                     wavelength = self._as_list(result.get("wavelength"))
                     lum_flux = self._as_list(result.get("luminescence_flux_density"))
@@ -166,7 +187,7 @@ class AbsPLDataManager:
                     if len(wavelength) == 0 or len(intensity) == 0:
                         continue
 
-                    measurement_uid = f"{sample_id}|{metadata.get('entry_id', entry_idx)}|{cycle_number}"
+                    measurement_uid = f"{sample_id}|{metadata.get('entry_id', entry_idx)}|{entry_idx}|{i}"
                     cycle_int = int(cycle_number) if str(cycle_number).isdigit() else cycle_number
 
                     summary_rows.append(
@@ -177,6 +198,7 @@ class AbsPLDataManager:
                             "batch": upload_name,
                             "condition": sample_desc if sample_desc else sample_id,
                             "entry_name": entry_name,
+                            "description_notes": description_notes,
                             "measurement_type": measurement_type,
                             "cycle_number": cycle_int,
                             "laser_spot_size": spot_size,
@@ -199,6 +221,7 @@ class AbsPLDataManager:
                             "condition": sample_desc if sample_desc else sample_id,
                             "batch": upload_name,
                             "entry_name": entry_name,
+                            "description_notes": description_notes,
                             "measurement_type": measurement_type,
                             "cycle_number": cycle_int,
                             "laser_spot_size": spot_size,
@@ -309,6 +332,7 @@ class AbsPLDataManager:
 
     def get_filter_options(self):
         summary = self.data.get("summary", pd.DataFrame())
+        spectra_all = self.data.get("spectra", pd.DataFrame())
         if summary.empty:
             return {
                 "measurement_types": [],
@@ -317,6 +341,7 @@ class AbsPLDataManager:
                 "cycles": [],
                 "filter_rows": [],
                 "numeric_columns": [],
+                "fit_curve_options": [],
             }
 
         numeric_columns = [
@@ -344,6 +369,35 @@ class AbsPLDataManager:
 
         cycles = pd.to_numeric(summary["cycle_number"], errors="coerce").dropna().astype(int).unique().tolist()
 
+        n_samples = int(summary["sample_id"].nunique()) if "sample_id" in summary.columns else 0
+        sweep_rows = summary[summary["measurement_type"].astype(str) == "sweep"].copy()
+        if sweep_rows.empty:
+            max_sweep_points_per_file = 0
+            n_sweep_measurements = 0
+        else:
+            key_cols = [c for c in ["sample_id", "batch", "entry_name", "cycle_number"] if c in sweep_rows.columns]
+            grouped_sizes = sweep_rows.groupby(key_cols).size() if key_cols else pd.Series([len(sweep_rows)])
+            max_sweep_points_per_file = int(grouped_sizes.max()) if len(grouped_sizes) else 0
+            n_sweep_measurements = int(len(grouped_sizes)) if len(grouped_sizes) else 0
+
+        max_required_colors = max(2, n_samples, max_sweep_points_per_file, n_sweep_measurements)
+
+        fit_curve_options = []
+        spectra_for_options = spectra_all if isinstance(spectra_all, pd.DataFrame) else pd.DataFrame()
+        if not spectra_for_options.empty and "measurement_uid" in spectra_for_options.columns:
+            cols = [c for c in ["measurement_uid", "measurement_type", "sample_id", "cycle_number", "laser_intensity_suns"] if c in spectra_for_options.columns]
+            curves_df = spectra_for_options[cols].dropna(subset=["measurement_uid"]).drop_duplicates(subset=["measurement_uid"])
+            for _, row in curves_df.iterrows():
+                uid = str(row.get("measurement_uid"))
+                mtype = str(row.get("measurement_type", "")).strip()
+                sample = str(row.get("sample_id", "")).strip()
+                cycle_val = pd.to_numeric(row.get("cycle_number"), errors="coerce")
+                cycle_text = f"C{int(cycle_val)}" if np.isfinite(cycle_val) else "C?"
+                suns_val = pd.to_numeric(row.get("laser_intensity_suns"), errors="coerce")
+                suns_text = f"{suns_val:.4g} sun" if np.isfinite(suns_val) else "n/a sun"
+                label = f"{mtype} | {sample} | {cycle_text} | {suns_text}"
+                fit_curve_options.append({"label": label, "value": uid})
+
         return {
             "measurement_types": sorted(summary["measurement_type"].dropna().astype(str).unique().tolist()),
             "samples": sorted(summary["sample_id"].dropna().astype(str).unique().tolist()),
@@ -351,4 +405,6 @@ class AbsPLDataManager:
             "cycles": sorted(cycles),
             "filter_rows": filter_rows.to_dict("records"),
             "numeric_columns": numeric_columns,
+            "max_required_colors": max_required_colors,
+            "fit_curve_options": fit_curve_options,
         }

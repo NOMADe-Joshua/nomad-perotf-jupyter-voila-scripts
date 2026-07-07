@@ -137,6 +137,7 @@ class AbsPLAppController:
                 with self.load_status_output:
                     print("Loaded successfully. Filter options updated.")
                 debug_logger_abspl.add("LOAD", f"Loaded data for {len(batch_ids)} batches", level="SUCCESS")
+                self.main_layout.selected_index = 1
             else:
                 with self.load_status_output:
                     print("No AbsPL data found for selected filters.")
@@ -157,6 +158,9 @@ class AbsPLAppController:
             print(f"Filtered summary rows: {len(summary_df)}")
             print(f"Filtered spectra rows: {len(spectra_df)}")
 
+        if len(summary_df) > 0 or len(spectra_df) > 0:
+            self.main_layout.selected_index = 2
+
         self._on_refresh_diagnostics(None)
 
     def _make_figure(self, spec, summary_df, spectra_df):
@@ -175,6 +179,12 @@ class AbsPLAppController:
                 color_sampling=spec.get("color_sampling", "sequential"),
                 color_count=spec.get("color_count", 8),
                 trace_order=spec.get("trace_order", None),
+                fit_enabled=bool(spec.get("fit_enabled", False)),
+                fit_model=spec.get("fit_model", "gaussian"),
+                fit_mode=spec.get("fit_mode", "auto"),
+                fit_min=spec.get("fit_min", None),
+                fit_max=spec.get("fit_max", None),
+                fit_curve_ranges=spec.get("fit_curve_ranges", None),
             )
 
         if ptype == "Sweep":
@@ -189,6 +199,12 @@ class AbsPLAppController:
                 color_sampling=spec.get("color_sampling", "sequential"),
                 color_count=spec.get("color_count", 8),
                 trace_order=spec.get("trace_order", None),
+                fit_enabled=bool(spec.get("fit_enabled", False)),
+                fit_model=spec.get("fit_model", "gaussian"),
+                fit_mode=spec.get("fit_mode", "auto"),
+                fit_min=spec.get("fit_min", None),
+                fit_max=spec.get("fit_max", None),
+                fit_curve_ranges=spec.get("fit_curve_ranges", None),
             )
 
         if ptype == "LuQY vs Laser Intensity":
@@ -199,6 +215,40 @@ class AbsPLAppController:
                 color_by=b or "sample_id",
                 log_x=(c == "log"),
                 title="LuQY vs Laser Intensity",
+                fit_enabled=bool(spec.get("fit_enabled", False)),
+                fit_min=spec.get("fit_min", None),
+                fit_max=spec.get("fit_max", None),
+                measurement_type="sweep",
+                color_scheme=spec.get("color_scheme", "Viridis"),
+                color_sampling=spec.get("color_sampling", "sequential"),
+                color_count=spec.get("color_count", 8),
+                trace_order=spec.get("trace_order", None),
+            )
+
+        if ptype == "QFLS vs Laser Intensity":
+            return self.plot_manager.qfls_intensity_plot(
+                summary_df,
+                group_mode=a or "combined",
+                color_by=b or "sample_id",
+                log_x=(c == "log"),
+                title="QFLS vs Laser Intensity",
+                fit_enabled=bool(spec.get("fit_enabled", False)),
+                fit_min=spec.get("fit_min", None),
+                fit_max=spec.get("fit_max", None),
+                measurement_type="sweep",
+                color_scheme=spec.get("color_scheme", "Viridis"),
+                color_sampling=spec.get("color_sampling", "sequential"),
+                color_count=spec.get("color_count", 8),
+                trace_order=spec.get("trace_order", None),
+            )
+
+        if ptype == "PLQY + QFLS vs Laser Intensity":
+            return self.plot_manager.plqy_qfls_dual_axis_plot(
+                summary_df,
+                group_mode=a or "combined",
+                color_by=b or "sample_id",
+                log_x=(c == "log"),
+                title="PLQY + QFLS vs Laser Intensity",
                 fit_enabled=bool(spec.get("fit_enabled", False)),
                 fit_min=spec.get("fit_min", None),
                 fit_max=spec.get("fit_max", None),

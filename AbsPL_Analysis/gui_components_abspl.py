@@ -5,6 +5,8 @@ GUI components for modular AbsPL analysis app.
 import ipywidgets as widgets
 import plotly.express as px
 import json
+import html
+import uuid
 from IPython.display import clear_output, display, HTML, Javascript
 
 
@@ -149,13 +151,16 @@ class AbsPLGUIComponents:
         self.trace_order_section.layout.display = "flex"
         self.trace_order_state.value = json.dumps(self.trace_order_values)
 
+        table_id = f"abspl-order-tbody-{uuid.uuid4().hex[:8]}"
+
         rows = ""
         for idx, value in enumerate(self.trace_order_values):
+            escaped_value = html.escape(value, quote=True)
             rows += (
-                f"<tr class='abspl-order-row' draggable='true' data-value='{value}'>"
+                f"<tr class='abspl-order-row' draggable='true' data-index='{idx}'>"
                 f"<td style='width:24px;text-align:center;color:#999;cursor:grab;'>≡</td>"
                 f"<td style='padding:8px 10px;'><span class='abspl-order-idx'>{idx+1}</span></td>"
-                f"<td style='padding:8px 10px;'>{value}</td>"
+                f"<td style='padding:8px 10px;'>{escaped_value}</td>"
                 "</tr>"
             )
 
@@ -165,22 +170,32 @@ class AbsPLGUIComponents:
             ".abspl-order-table td{border-bottom:1px solid #eee;}"
             ".abspl-order-row.drag-over{background:#eef6ff;border-top:2px solid #3b82f6;}"
             "</style>"
-            "<table class='abspl-order-table'><tbody id='abspl-order-tbody'>"
+            f"<table class='abspl-order-table'><tbody id='{table_id}'>"
             f"{rows}"
             "</tbody></table>"
         )
 
         js_code = """
         (function(){
-            setTimeout(function(){
-                const tbody = document.querySelector('#abspl-order-tbody');
-                if(!tbody) return;
+            function initDragDrop(attempt){
+                const tbody = document.querySelector('#__TABLE_ID__');
+                if(!tbody){
+                    if(attempt < 20){
+                        setTimeout(function(){ initDragDrop(attempt + 1); }, 120);
+                    }
+                    return;
+                }
                 const rows = Array.from(tbody.querySelectorAll('tr.abspl-order-row'));
                 let dragged = null;
+                const sourceValues = __SOURCE_VALUES__;
 
                 function syncState(){
                     const ordered = Array.from(tbody.querySelectorAll('tr.abspl-order-row'))
-                        .map(r => r.getAttribute('data-value'))
+                        .map(r => {
+                            const idx = parseInt(r.getAttribute('data-index'), 10);
+                            if(Number.isNaN(idx) || idx < 0 || idx >= sourceValues.length) return null;
+                            return sourceValues[idx];
+                        })
                         .filter(v => !!v);
                     const stateInput = document.querySelector('.abspl-trace-order-state input, .abspl-trace-order-state textarea');
                     if(stateInput){
@@ -210,9 +225,12 @@ class AbsPLGUIComponents:
                     });
                 });
                 syncState();
-            }, 100);
+            }
+            initDragDrop(0);
         })();
         """
+        js_code = js_code.replace("__TABLE_ID__", table_id)
+        js_code = js_code.replace("__SOURCE_VALUES__", json.dumps(self.trace_order_values))
         display(Javascript(js_code))
 
     def _with_all_option(self, values):
@@ -320,6 +338,8 @@ class AbsPLGUIComponents:
                 "PL + PL (sweep ~1 sun)",
                 "Sweep",
                 "LuQY vs Laser Intensity",
+                "QFLS vs Laser Intensity",
+                "PLQY + QFLS vs Laser Intensity",
             ],
             value="PL (only)",
             description="Plot",
@@ -331,8 +351,25 @@ class AbsPLGUIComponents:
         include_sweep = widgets.Checkbox(value=True, description="Show nearest sweep (~1 sun)", indent=False, layout=widgets.Layout(width="260px"))
         legend_table = widgets.Checkbox(value=False, description="Legend as table below", indent=False, layout=widgets.Layout(width="220px"))
         fit_enabled = widgets.Checkbox(value=False, description="Linear fit", indent=False, layout=widgets.Layout(width="130px"))
-        fit_min = widgets.Text(value="", description="Fit min", layout=widgets.Layout(width="170px"))
-        fit_max = widgets.Text(value="", description="Fit max", layout=widgets.Layout(width="170px"))
+        fit_model = widgets.Dropdown(
+            options=[("Gaussian", "gaussian"), ("Voigt", "voigt")],
+            value="gaussian",
+            description="Peak fit",
+            layout=widgets.Layout(width="220px", display="none"),
+        )
+        fit_mode = widgets.Dropdown(
+            options=[("Auto", "auto"), ("Manual", "manual")],
+            value="auto",
+            description="Fit mode",
+            layout=widgets.Layout(width="220px", display="none"),
+        )
+        fit_xmin = widgets.Text(value="", description="xmin", layout=widgets.Layout(width="170px"))
+        fit_xmax = widgets.Text(value="", description="xmax", layout=widgets.Layout(width="170px"))
+        fit_curve_dropdown = widgets.Dropdown(options=[("All curves", "__all__")], value="__all__", description="Curve", layout=widgets.Layout(width="280px", display="none"))
+        fit_curve_min = widgets.Text(value="", description="xmin", layout=widgets.Layout(width="170px", display="none"))
+        fit_curve_max = widgets.Text(value="", description="xmax", layout=widgets.Layout(width="170px", display="none"))
+        fit_curve_set = widgets.Button(description="Set range", button_style="info", layout=widgets.Layout(width="110px", display="none"))
+        fit_curve_ranges_html = widgets.HTML(value="", layout=widgets.Layout(display="none"))
         remove_btn = widgets.Button(description="Remove", button_style="danger", layout=widgets.Layout(width="100px"))
 
         row = {
@@ -343,17 +380,71 @@ class AbsPLGUIComponents:
             "include_sweep": include_sweep,
             "legend_table": legend_table,
             "fit_enabled": fit_enabled,
-            "fit_min": fit_min,
-            "fit_max": fit_max,
+            "fit_model": fit_model,
+            "fit_mode": fit_mode,
+            "fit_xmin": fit_xmin,
+            "fit_xmax": fit_xmax,
+            "fit_curve_dropdown": fit_curve_dropdown,
+            "fit_curve_min": fit_curve_min,
+            "fit_curve_max": fit_curve_max,
+            "fit_curve_set": fit_curve_set,
+            "fit_curve_ranges_html": fit_curve_ranges_html,
+            "fit_curve_ranges": {},
             "remove": remove_btn,
         }
+
+        def _render_fit_curve_ranges():
+            ranges = row["fit_curve_ranges"]
+            if not ranges:
+                fit_curve_ranges_html.value = "<span style='color:#667085;font-size:12px;'>No per-curve fit ranges set.</span>"
+                return
+            lines = ["<div style='font-size:12px;color:#334155;'><b>Per-curve fit ranges:</b></div>"]
+            for key in sorted(ranges.keys()):
+                cfg = ranges[key]
+                xmin_text = "-" if cfg.get("fit_min") is None else str(cfg.get("fit_min"))
+                xmax_text = "-" if cfg.get("fit_max") is None else str(cfg.get("fit_max"))
+                lines.append(f"<div style='font-size:12px;color:#334155;'>{html.escape(str(key))}: xmin={xmin_text}, xmax={xmax_text}</div>")
+            fit_curve_ranges_html.value = "".join(lines)
+
+        def _parse_curve_bound(text):
+            s = str(text).strip()
+            if not s:
+                return None
+            try:
+                return float(s)
+            except Exception:
+                return None
+
+        def _set_curve_range(_btn):
+            curve_key = fit_curve_dropdown.value
+            if not curve_key or curve_key == "__all__":
+                return
+            vmin = _parse_curve_bound(fit_curve_min.value)
+            vmax = _parse_curve_bound(fit_curve_max.value)
+            if vmin is None and vmax is None:
+                if curve_key in row["fit_curve_ranges"]:
+                    del row["fit_curve_ranges"][curve_key]
+            else:
+                row["fit_curve_ranges"][curve_key] = {"fit_min": vmin, "fit_max": vmax}
+            _render_fit_curve_ranges()
+
+        fit_curve_set.on_click(_set_curve_range)
+        _render_fit_curve_ranges()
 
         def refresh_options(*_args):
             if kind.value in ["PL (only)", "PL + PL (sweep ~1 sun)"]:
                 include_sweep.layout.display = "none"
-                fit_enabled.layout.display = "none"
-                fit_min.layout.display = "none"
-                fit_max.layout.display = "none"
+                fit_enabled.description = "Peak fit"
+                fit_enabled.layout.display = "flex"
+                fit_model.layout.display = "flex"
+                fit_mode.layout.display = "flex"
+                fit_xmin.layout.display = "none"
+                fit_xmax.layout.display = "none"
+                fit_curve_dropdown.layout.display = "flex"
+                fit_curve_min.layout.display = "flex"
+                fit_curve_max.layout.display = "flex"
+                fit_curve_set.layout.display = "flex"
+                fit_curve_ranges_html.layout.display = "flex"
                 opt_a.description = "Color by"
                 opt_b.description = "Source"
                 opt_c.description = "-"
@@ -364,9 +455,17 @@ class AbsPLGUIComponents:
                 opt_c.value = "-"
             elif kind.value == "Sweep":
                 include_sweep.layout.display = "none"
-                fit_enabled.layout.display = "none"
-                fit_min.layout.display = "none"
-                fit_max.layout.display = "none"
+                fit_enabled.description = "Peak fit"
+                fit_enabled.layout.display = "flex"
+                fit_model.layout.display = "flex"
+                fit_mode.layout.display = "flex"
+                fit_xmin.layout.display = "none"
+                fit_xmax.layout.display = "none"
+                fit_curve_dropdown.layout.display = "flex"
+                fit_curve_min.layout.display = "flex"
+                fit_curve_max.layout.display = "flex"
+                fit_curve_set.layout.display = "flex"
+                fit_curve_ranges_html.layout.display = "flex"
                 opt_a.description = "Mode"
                 opt_b.description = "Color by"
                 opt_c.description = "Source"
@@ -376,11 +475,19 @@ class AbsPLGUIComponents:
                 opt_b.value = "condition"
                 opt_c.options = [("Flux density", "luminescence_flux_density")]
                 opt_c.value = "luminescence_flux_density"
-            elif kind.value == "LuQY vs Laser Intensity":
+            elif kind.value in ["LuQY vs Laser Intensity", "QFLS vs Laser Intensity", "PLQY + QFLS vs Laser Intensity"]:
                 include_sweep.layout.display = "none"
+                fit_enabled.description = "Linear fit"
                 fit_enabled.layout.display = "flex"
-                fit_min.layout.display = "flex"
-                fit_max.layout.display = "flex"
+                fit_model.layout.display = "none"
+                fit_mode.layout.display = "none"
+                fit_xmin.layout.display = "flex"
+                fit_xmax.layout.display = "flex"
+                fit_curve_dropdown.layout.display = "none"
+                fit_curve_min.layout.display = "none"
+                fit_curve_max.layout.display = "none"
+                fit_curve_set.layout.display = "none"
+                fit_curve_ranges_html.layout.display = "none"
                 opt_a.description = "Mode"
                 opt_b.description = "Color by"
                 opt_c.description = "X scale"
@@ -390,6 +497,11 @@ class AbsPLGUIComponents:
                 opt_b.value = "sample_id"
                 opt_c.options = [("Linear", "linear"), ("Log", "log")]
                 opt_c.value = "linear"
+                if kind.value == "LuQY vs Laser Intensity":
+                    fit_enabled.value = False
+                    fit_enabled.disabled = True
+                else:
+                    fit_enabled.disabled = False
 
         kind.observe(refresh_options, names="value")
 
@@ -445,8 +557,18 @@ class AbsPLGUIComponents:
                     row["include_sweep"],
                     row["legend_table"],
                     row["fit_enabled"],
-                    row["fit_min"],
-                    row["fit_max"],
+                    row["fit_model"],
+                    row["fit_mode"],
+                    row["fit_xmin"],
+                    row["fit_xmax"],
+                ]
+            )
+            per_curve_row = widgets.HBox(
+                [
+                    row["fit_curve_dropdown"],
+                    row["fit_curve_min"],
+                    row["fit_curve_max"],
+                    row["fit_curve_set"],
                 ]
             )
             widget_rows.append(
@@ -454,7 +576,16 @@ class AbsPLGUIComponents:
                     [
                         top_row,
                         bottom_row,
-                    ]
+                        per_curve_row,
+                        row["fit_curve_ranges_html"],
+                    ],
+                    layout=widgets.Layout(
+                        border="1px solid #d0d5dd",
+                        padding="10px",
+                        margin="8px 0",
+                        border_radius="6px",
+                        background_color="#fcfcfd",
+                    ),
                 )
             )
         self.plot_rows_container.children = tuple(widget_rows)
@@ -476,6 +607,14 @@ class AbsPLGUIComponents:
             self._add_selection_row(None)
 
         self._update_trace_order_widget(options.get("samples", []))
+        max_required_colors = int(options.get("max_required_colors", 8) or 8)
+        self.color_selector.set_num_colors(max_required_colors)
+
+        curve_options = self._fit_curve_options()
+        for row in self.plot_rows:
+            current_curve = row["fit_curve_dropdown"].value
+            row["fit_curve_dropdown"].options = curve_options
+            row["fit_curve_dropdown"].value = current_curve if any(v == current_curve for _, v in curve_options) else "__all__"
 
         for row in self.plot_rows:
             try:
@@ -536,16 +675,29 @@ class AbsPLGUIComponents:
                     "include_sweep_pl": include_sweep_pl,
                     "plot_type_ui": plot_type_value,
                     "legend_table_below": bool(row["legend_table"].value),
-                    "fit_enabled": bool(row["fit_enabled"].value),
-                    "fit_min": _parse_optional_float(row["fit_min"].value),
-                    "fit_max": _parse_optional_float(row["fit_max"].value),
+                    "fit_enabled": bool(row["fit_enabled"].value) and (plot_type_value != "LuQY vs Laser Intensity"),
+                    "fit_model": row["fit_model"].value,
+                    "fit_mode": row["fit_mode"].value,
+                    "fit_min": _parse_optional_float(row["fit_xmin"].value),
+                    "fit_max": _parse_optional_float(row["fit_xmax"].value),
+                    "fit_curve_ranges": row.get("fit_curve_ranges", {}),
                     "color_scheme": self.color_selector.selected_scheme,
-                    "color_sampling": self.color_selector.sampling_dropdown.value,
-                    "color_count": int(self.color_selector.num_colors_slider.value),
+                    "color_sampling": "sequential",
+                    "color_count": int(self.color_selector.num_colors),
                     "trace_order": trace_order,
                 }
             )
         return specs
+
+    def _fit_curve_options(self):
+        option_rows = self.filter_options.get("fit_curve_options", []) or []
+        options = [("All curves", "__all__")]
+        for item in option_rows:
+            label = str(item.get("label", "")).strip()
+            value = str(item.get("value", "")).strip()
+            if label and value:
+                options.append((label, value))
+        return options
 
 
 class ColorSchemeSelector:
@@ -583,76 +735,22 @@ class ColorSchemeSelector:
             value=self.selected_scheme,
             description='Color Scheme:',
             style={'description_width': 'initial'},
-            layout=widgets.Layout(width='300px')
-        )
-
-        self.sampling_dropdown = widgets.Dropdown(
-            options=['sequential', 'even'],
-            value='sequential',
-            description='Sampling:',
-            style={'description_width': 'initial'},
-            layout=widgets.Layout(width='200px')
-        )
-        
-        self.num_colors_slider = widgets.IntSlider(
-            value=8,
-            min=2,
-            max=20,
-            step=1,
-            description='# Colors:',
-            style={'description_width': 'initial'},
-            layout=widgets.Layout(width='300px')
-        )
-        
-        self.preview_output = widgets.Output(
-            layout=widgets.Layout(width='400px', height='60px', border='1px solid #ccc')
+            layout=widgets.Layout(width='420px')
         )
         
         self.color_dropdown.observe(self._on_color_change, names='value')
-        self.sampling_dropdown.observe(self._on_sampling_change, names='value')
-        self.num_colors_slider.observe(self._on_num_colors_change, names='value')
-        
-        self._update_preview()
         
         self.widget = widgets.VBox([
-            widgets.HBox([self.color_dropdown, self.sampling_dropdown]),
-            self.num_colors_slider,
-            self.preview_output
-        ])
-
-    def _on_sampling_change(self, change):
-        self._update_preview()
+            self.color_dropdown,
+        ], layout=widgets.Layout(width='100%'))
     
     def _on_color_change(self, change):
         self.selected_scheme = change['new']
         self._update_preview()
     
     def _on_num_colors_change(self, change):
-        """Handle number of colors change"""
-        self.num_colors = change['new']
-        self._update_preview()
-    
-    def _update_preview(self):
-        with self.preview_output:
-            clear_output(wait=True)
-            
-            colors = self.get_colors(num_colors=self.num_colors, sampling=self.sampling_dropdown.value)
-            
-            if self.sampling_dropdown.value == 'even':
-                sampling_text = "Even Sampling"
-            else:
-                sampling_text = "Continuous Gradient"
-            
-            html_preview = '<div style="display: flex; flex-direction: column; padding: 5px;">'
-            html_preview += f'<span style="margin-bottom: 5px; font-weight: bold;">{self.selected_scheme} ({sampling_text}): {len(colors)} colors</span>'
-            html_preview += '<div style="display: flex; flex-wrap: wrap;">'
-            
-            for color in colors:
-                html_preview += f'<span style="background-color: {color}; width: 30px; height: 30px; display: inline-block; margin: 2px; border: 1px solid #333; border-radius: 3px;"></span>'
-            
-            html_preview += '</div></div>'
-            
-            display(HTML(html_preview))
+        """Compatibility no-op: color count control removed from UI."""
+        self.num_colors = change.get('new', self.num_colors) if isinstance(change, dict) else self.num_colors
     
     def _interpolate_color(self, hex_color1, hex_color2, factor):
         """Interpolate between two colors"""
@@ -750,8 +848,8 @@ class ColorSchemeSelector:
 
     def set_num_colors(self, num_colors):
         """Set the number of colors to generate"""
-        num_colors = max(2, min(20, num_colors))
-        self.num_colors_slider.value = num_colors
+        num_colors = max(2, min(120, num_colors))
+        self.num_colors = num_colors
 
     def get_widget(self):
         """Get the color scheme selector widget"""
