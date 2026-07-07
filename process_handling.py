@@ -9,16 +9,16 @@ import itertools
 from IPython.display import display, HTML
 
 class NpEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return str(obj)
-        if isinstance(obj, np.bool_):
-            return bool(obj)
-        return super(NpEncoder, self).default(obj)
+    def default(self, o):
+        if isinstance(o, np.integer):
+            return int(o)
+        if isinstance(o, np.floating):
+            return float(o)
+        if isinstance(o, np.ndarray):
+            return str(o)
+        if isinstance(o, np.bool_):
+            return bool(o)
+        return super(NpEncoder, self).default(o)
 
 #class to hold data about production steps and samples in a batch and provide visualization
 class batch_process(widgets.GridBox):
@@ -211,13 +211,34 @@ def merge_process(process_list, exclude_non_numeric, recursion_depth):
     return return_list
 
 def make_table(process, index_map, remove_constants=False, remove_string=False, abbreviate_keys=False):
+    def normalize_column_values(values, row_count):
+        """Return a list with exactly row_count elements for DataFrame construction."""
+        if row_count <= 0:
+            return []
+
+        # Regular case: one value per row.
+        if isinstance(values, np.ndarray) and values.ndim == 1 and len(values) == row_count:
+            return values.tolist()
+        if isinstance(values, list) and len(values) == row_count:
+            return values
+
+        # Fallback: treat complex/mismatched arrays as a single cell value.
+        if isinstance(values, np.ndarray):
+            cell_value = values.tolist()
+        else:
+            cell_value = values
+        return [cell_value] * row_count
+
     column_data = flatten_layers(process["json"],[], remove_constants, remove_string)
+    row_index = list(map(lambda idx:str(index_map[idx]), process["indices"]))
+    row_count = len(row_index)
+
     if abbreviate_keys:
-        return pd.DataFrame(dict(map(lambda x:(str(x[0][-1]),x[1]), column_data)), 
-                            index=list(map(lambda idx:str(index_map[idx]), process["indices"])))
+        column_dict = dict(map(lambda x: (str(x[0][-1]), normalize_column_values(x[1], row_count)), column_data))
     else:
-        return pd.DataFrame(dict(map(lambda x:(str(x[0]),x[1]), column_data)),
-                            index=list(map(lambda idx:str(index_map[idx]), process["indices"])))
+        column_dict = dict(map(lambda x: (str(x[0]), normalize_column_values(x[1], row_count)), column_data))
+
+    return pd.DataFrame(column_dict, index=row_index)
 
 #expects an object of nested dicts or list with numpy arrays as endpoints. returns a list of tuples, each tuple contains a list of keys used to adress the data in the orginal array and the corresponding array.
 def flatten_layers(data, keychain, remove_constants, remove_string):
@@ -232,3 +253,4 @@ def flatten_layers(data, keychain, remove_constants, remove_string):
         return list(itertools.chain.from_iterable(map(lambda idx_entry : flatten_layers(idx_entry[1], keychain+[str(idx_entry[0])], remove_constants, remove_string), enumerate(data))))
     elif isinstance(data,dict):
         return list(itertools.chain.from_iterable(map(lambda key : flatten_layers(data[key], keychain + [key], remove_constants, remove_string), data)))
+    return []
