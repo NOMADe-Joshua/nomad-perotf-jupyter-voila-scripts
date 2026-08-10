@@ -436,9 +436,12 @@ class FittingModels:
             
             # Set initial values based on UI input
             if peak_info['type'] == 'Gaussian':
-                peak_params[f'p{i}_center'].set(value=peak_info['center'], min=peak_info['center']-50, max=peak_info['center']+50)
-                peak_params[f'p{i}_amplitude'].set(value=peak_info['height']*peak_info['sigma']*np.sqrt(2*np.pi), min=0)
-                peak_params[f'p{i}_sigma'].set(value=peak_info['sigma'], min=0.00001, max=100)
+                _ctol = peak_info.get('center_tol', 10)
+                _smin = peak_info.get('min_sigma', 0.01)
+                _sig  = max(peak_info['sigma'], _smin)
+                peak_params[f'p{i}_center'].set(value=peak_info['center'], min=peak_info['center']-_ctol, max=peak_info['center']+_ctol)
+                peak_params[f'p{i}_amplitude'].set(value=peak_info['height']*_sig*np.sqrt(2*np.pi), min=1e-9)
+                peak_params[f'p{i}_sigma'].set(value=_sig, min=_smin, max=100)
             elif peak_info['type'] == 'Polynomial':
                 # Polynomial - use fitted coefficients if available
                 degree = peak_info.get('poly_degree', 2)
@@ -504,8 +507,16 @@ class FittingModels:
         if model is None:
             raise ValueError("Model creation failed")
         
-        # Perform fitting
-        result = model.fit(intensities, params, x=wavelengths)
+        # Perform fitting — try leastsq first; if it generates NaN values fall back
+        # to the TRF (Trust Region Reflective) solver which strictly respects bounds.
+        try:
+            result = model.fit(intensities, params, x=wavelengths, method='leastsq')
+        except ValueError as _e:
+            if 'NaN' in str(_e) or 'nan' in str(_e).lower():
+                result = model.fit(intensities, params, x=wavelengths,
+                                   method='least_squares')
+            else:
+                raise
         
         return result
         

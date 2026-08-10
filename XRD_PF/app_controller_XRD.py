@@ -17,6 +17,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 
+
+
 # ── Path setup ───────────────────────────────────────────────────────────────
 _this_dir   = os.path.dirname(os.path.abspath(__file__))
 _parent_dir = os.path.dirname(_this_dir)
@@ -65,7 +67,7 @@ class SimpleAuthManager:
         self.current_token = data["access_token"]
         return self.current_token
 
-    def authenticate_with_token(self, token: str = None) -> str:
+    def authenticate_with_token(self, token=None) -> str:
         if token is None:
             token = os.environ.get("NOMAD_CLIENT_ACCESS_TOKEN", "")
         self.current_token = token
@@ -672,7 +674,7 @@ class XRDAnalysisApp:
         self._last_overlay_fig = fig
         with self.plot_output:
             clear_output(wait=True)
-            fig.show()
+            display(go.FigureWidget(fig))
 
     # ── peak analysis ─────────────────────────────────────────────────────────
 
@@ -785,7 +787,7 @@ class XRDAnalysisApp:
 
         with self.peak_plot_output:
             clear_output(wait=True)
-            fig.show()
+            display(go.FigureWidget(fig))
 
     def _draw_peak_table(self, peaks, fit_result=None):
         """Print a tidy table of detected (and optionally fitted) peak parameters."""
@@ -831,13 +833,20 @@ class XRDAnalysisApp:
         y_norm = self._peak_y_norm
         label  = self._peak_label
 
+        # Minimum sigma = 2.5× the median step so the Gaussian never collapses to zero
+        x_arr     = np.asarray(x) if x is not None else np.array([])
+        x_step    = float(np.median(np.diff(x_arr))) if len(x_arr) > 1 else 0.02
+        min_sigma = max(x_step * 2.5, 0.02)
+        # Keep peaks within ±5× their own sigma of their detected centre
         peak_models = [
             {
-                "type":   "Gaussian",
-                "center": float(pk["center"]),
-                "height": float(pk["height"]),
-                "sigma":  max(float(pk.get("sigma", 0.1)), 0.01),
-                "gamma":  1.0,
+                "type":       "Gaussian",
+                "center":     float(pk["center"]),
+                "height":     max(float(pk["height"]), 0.01),
+                "sigma":      max(float(pk.get("sigma", min_sigma * 3)), min_sigma),
+                "gamma":      1.0,
+                "min_sigma":  min_sigma,
+                "center_tol": min(10.0, max(x_step * 20, 1.0)),
             }
             for pk in self._detected_peaks
         ]
