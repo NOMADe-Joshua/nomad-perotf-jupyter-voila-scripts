@@ -270,6 +270,17 @@ class JVAnalysisApp:
         self.download_pptx_output = widgets.Output(
             layout=widgets.Layout(border='1px solid #eee', padding='10px', margin='10px 0 0 0')
         )
+
+        self.download_theresa_button = widgets.Button(
+            description='Theresa Style Download',
+            button_style='primary',
+            icon='download',
+            layout=widgets.Layout(min_width='220px'),
+            disabled=True
+        )
+        self.download_theresa_output = widgets.Output(
+            layout=widgets.Layout(border='1px solid #eee', padding='10px', margin='10px 0 0 0')
+        )
     
     def _create_tabs(self):
         """Create tab system"""
@@ -305,9 +316,10 @@ class JVAnalysisApp:
         self.download_tab = widgets.VBox([
             widgets.HTML("<h3>Download</h3>"),
             widgets.HTML("<p>Create one ZIP containing live plots as SVG/PNG plus a variation summary table.</p>"),
-            widgets.HBox([self.download_zip_button, self.download_pptx_button]),
+            widgets.HBox([self.download_zip_button, self.download_pptx_button, self.download_theresa_button]),
             self.download_zip_output,
-            self.download_pptx_output
+            self.download_pptx_output,
+            self.download_theresa_output
         ])
 
         # Create debug dashboard tab
@@ -385,6 +397,7 @@ class JVAnalysisApp:
         self.download_curves_button.on_click(self._download_curves_data)
         self.download_zip_button.on_click(self._on_download_zip_clicked)
         self.download_pptx_button.on_click(self._on_download_pptx_clicked)
+        self.download_theresa_button.on_click(self._on_theresa_download_clicked)
     
     def _on_variable_order_changed(self):
         """Handle when variable order is changed - update debug and regenerate plots"""
@@ -883,6 +896,7 @@ If you tested specific variables or conditions for each sample, please write the
 
                     # Enable and navigate to the Select Plots tab
                     self._enable_tab(3)
+                    self.download_theresa_button.disabled = False
                     try:
                         # Select the plots tab (index 3)
                         self.tabs.selected_index = 3
@@ -1766,6 +1780,286 @@ If you tested specific variables or conditions for each sample, please write the
             # Inject library + generation code as a single script so PptxGenJS
             # is synchronously available when the async IIFE starts.
             display(Javascript(pptxgen_js + '\n' + js_code))
+
+    def _on_theresa_download_clicked(self, b=None):
+        """Download all individual JV curves (Forward + Reverse) as HTML plots in a ZIP."""
+        import numpy as np
+        import plotly.io as pio
+        from plotly.subplots import make_subplots
+
+        with self.download_theresa_output:
+            clear_output(wait=True)
+            print("⏳ Building individual JV curve plots...")
+
+        data = self.data_manager.get_data()
+        all_jv = data.get('jvc', pd.DataFrame())
+        if all_jv.empty:
+            with self.download_theresa_output:
+                clear_output(wait=True)
+                print("❌ No JV data available. Please load a batch first.")
+            return
+
+        filtered_jv = data.get('filtered', pd.DataFrame())
+        # Always use the full original curves so rejected-data groups have matching curves too
+        curves_df = data.get('curves', pd.DataFrame())
+        if curves_df is None or curves_df.empty:
+            curves_df = data.get('filtered_curves', pd.DataFrame())
+
+        if curves_df.empty:
+            with self.download_theresa_output:
+                clear_output(wait=True)
+                print("❌ No curve data available.")
+            return
+
+        # Build a lookup of REJECTED group keys — those get the _filtered suffix
+        junk_jv = data.get('junk', pd.DataFrame())
+        key_cols_check = [c for c in ['sample', 'px_number', 'cycle_number'] if c in junk_jv.columns]
+        junk_keys: set = set()
+        if not junk_jv.empty and key_cols_check:
+            for _, jrow in junk_jv.drop_duplicates(subset=key_cols_check).iterrows():
+                junk_keys.add(tuple(None if pd.isna(jrow[c]) else jrow[c] for c in key_cols_check))
+
+        # Use light measurements only
+        if 'ilum' in all_jv.columns:
+            light_jv = all_jv[all_jv['ilum'] != 'Dark'].copy()
+        else:
+            light_jv = all_jv.copy()
+
+        group_cols = [c for c in ['sample', 'px_number', 'cycle_number'] if c in light_jv.columns]
+
+        zip_buf = io.BytesIO()
+        plot_count = 0
+
+        with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for group_key, group_df in light_jv.groupby(group_cols, dropna=False):
+                if not isinstance(group_key, tuple):
+                    group_key = (group_key,)
+                key_dict = dict(zip(group_cols, group_key))
+
+                sample_val = key_dict.get('sample', 'unknown')
+                px_val = key_dict.get('px_number', None)
+                cycle_val = key_dict.get('cycle_number', None)
+
+                sample_clean = str(sample_val).split('/')[-1].split('.')[0] if sample_val else 'unknown'
+                px_str = str(px_val) if (px_val is not None and str(px_val).lower() not in ('nan', 'none', '')) else 'px'
+                if cycle_val is not None and str(cycle_val).lower() not in ('nan', 'none', ''):
+                    try:
+                        cycle_str = f"cycle{int(float(cycle_val))}"
+                    except Exception:
+                        cycle_str = 'cycle'
+                else:
+                    cycle_str = 'cycle'
+
+                norm_key = tuple(None if pd.isna(key_dict.get(c)) else key_dict.get(c) for c in key_cols_check)
+                filtered_suffix = '_filtered' if norm_key in junk_keys else ''
+                filename_base = f"{sample_clean}_{px_str}_{cycle_str}{filtered_suffix}"
+
+                if 'direction' in group_df.columns:
+                    rev_df = group_df[group_df['direction'] == 'Reverse']
+                    fwd_df = group_df[group_df['direction'] == 'Forward']
+                else:
+                    rev_df = group_df
+                    fwd_df = pd.DataFrame()
+
+                fig = self._build_theresa_jv_plot(
+                    fwd_df, rev_df, curves_df,
+                    sample_label=sample_clean,
+                    px_str=px_str,
+                    cycle_str=cycle_str
+                )
+
+                if fig is None:
+                    continue
+
+                html_content = fig.to_html(include_plotlyjs='cdn', full_html=True)
+                zf.writestr(f"{filename_base}.html", html_content)
+                plot_count += 1
+
+        if plot_count == 0:
+            with self.download_theresa_output:
+                clear_output(wait=True)
+                print("❌ No plots could be created. Ensure curve data is loaded.")
+            return
+
+        zip_buf.seek(0)
+        zip_b64 = base64.b64encode(zip_buf.read()).decode('utf-8')
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        zip_name = f"Theresa_JV_{timestamp}.zip"
+
+        js_code = f"""
+(function() {{
+    var b64 = "{zip_b64}";
+    var byteStr = atob(b64);
+    var buf = new Uint8Array(byteStr.length);
+    for (var i = 0; i < byteStr.length; i++) buf[i] = byteStr.charCodeAt(i);
+    var blob = new Blob([buf], {{type: 'application/zip'}});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = '{zip_name}';
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+}})();
+"""
+        with self.download_theresa_output:
+            clear_output(wait=True)
+            print(f"✅ Created {plot_count} plots. Download starting...")
+            display(Javascript(js_code))
+
+    def _build_theresa_jv_plot(self, fwd_df, rev_df, curves_df,
+                                batch_name='', sample_label='',
+                                px_str='px', cycle_str='cycle'):
+        """Build one JV plot (Theresa style): Reverse=blue dots, Forward=red crosses, with performance table."""
+        import numpy as np
+        from plotly.subplots import make_subplots
+
+        def _extract_iv(jv_row_df, curves):
+            """Return (voltage, current) arrays for the best-PCE row in jv_row_df."""
+            if jv_row_df.empty or curves.empty:
+                return None, None
+            row = jv_row_df.sort_values('PCE(%)').iloc[-1] if 'PCE(%)' in jv_row_df.columns else jv_row_df.iloc[0]
+            mask = pd.Series([True] * len(curves), index=curves.index)
+            for col in ['sample', 'direction']:
+                if col in curves.columns and col in row.index and pd.notna(row[col]):
+                    mask &= (curves[col] == row[col])
+            for col in ['cell', 'px_number']:
+                if col in curves.columns and col in row.index:
+                    if pd.notna(row[col]):
+                        mask &= (curves[col] == row[col])
+                    else:
+                        mask &= curves[col].isna()
+            if 'cycle_number' in curves.columns and 'cycle_number' in row.index:
+                if pd.notna(row['cycle_number']):
+                    mask &= (curves['cycle_number'] == row['cycle_number'])
+                else:
+                    mask &= curves['cycle_number'].isna()
+            matched = curves[mask]
+            v_rows = matched[matched['variable'] == 'Voltage (V)']
+            j_rows = matched[matched['variable'] == 'Current Density(mA/cm2)']
+            if v_rows.empty or j_rows.empty:
+                return None, None
+            numeric_cols = sorted([c for c in v_rows.columns if isinstance(c, int)])
+            if not numeric_cols:
+                return None, None
+            v = v_rows.iloc[0][numeric_cols].values.astype(float)
+            j = j_rows.iloc[0][numeric_cols].values.astype(float)
+            valid = ~(np.isnan(v) | np.isnan(j))
+            v, j = v[valid], j[valid]
+            return (v, j) if len(v) > 0 else (None, None)
+
+        def _get_params(df):
+            if df.empty:
+                return dict(pce=float('nan'), ff=float('nan'), jsc=float('nan'), voc=float('nan'))
+            row = df.sort_values('PCE(%)').iloc[-1] if 'PCE(%)' in df.columns else df.iloc[0]
+            def _v(col):
+                return row[col] if col in row.index else float('nan')
+            return {'pce': _v('PCE(%)'), 'ff': _v('FF(%)'), 'jsc': _v('Jsc(mA/cm2)'), 'voc': _v('Voc(V)')}
+
+        def _fmt(val, dec=2):
+            try:
+                f = float(val)
+                return 'N/A' if f != f else f"{f:.{dec}f}"
+            except Exception:
+                return 'N/A'
+
+        rev_v, rev_j = _extract_iv(rev_df, curves_df)
+        fwd_v, fwd_j = _extract_iv(fwd_df, curves_df)
+
+        if rev_v is None and fwd_v is None:
+            return None
+
+        rev_p = _get_params(rev_df)
+        fwd_p = _get_params(fwd_df)
+
+        rev_jsc_abs = abs(float(rev_p['jsc'])) if pd.notna(rev_p['jsc']) else float('nan')
+        fwd_jsc_abs = abs(float(fwd_p['jsc'])) if pd.notna(fwd_p['jsc']) else float('nan')
+
+        fig = make_subplots(
+            rows=1, cols=2,
+            column_widths=[0.68, 0.32],
+            specs=[[{"type": "scatter"}, {"type": "table"}]],
+            horizontal_spacing=0.04
+        )
+
+        if rev_v is not None:
+            fig.add_trace(go.Scatter(
+                x=rev_v, y=rev_j,
+                mode='lines+markers',
+                marker=dict(symbol='circle', size=5, color='#1f77b4'),
+                line=dict(color='#1f77b4', width=2),
+                name='Reverse',
+                showlegend=True
+            ), row=1, col=1)
+
+        if fwd_v is not None:
+            fig.add_trace(go.Scatter(
+                x=fwd_v, y=fwd_j,
+                mode='lines+markers',
+                marker=dict(symbol='x', size=7, color='red'),
+                line=dict(color='red', width=2),
+                name='Forward',
+                showlegend=True
+            ), row=1, col=1)
+
+        try:
+            rev_pce_f, fwd_pce_f = float(rev_p['pce']), float(fwd_p['pce'])
+            if pd.notna(rev_p['pce']) and pd.notna(fwd_p['pce']) and rev_pce_f != 0:
+                hysteresis_str = _fmt((rev_pce_f - fwd_pce_f) / rev_pce_f, 3)
+            else:
+                hysteresis_str = 'N/A'
+        except Exception:
+            hysteresis_str = 'N/A'
+
+        fig.add_trace(go.Table(
+            header=dict(
+                values=['', 'PCE (%)', 'FF (%)', 'Jsc (mA/cm²)', 'Voc (V)'],
+                fill_color='#1f3964',
+                font=dict(color='white', size=11),
+                align='center',
+                height=28
+            ),
+            cells=dict(
+                values=[
+                    ['Reverse', 'Forward', 'Hysterese'],
+                    [_fmt(rev_p['pce']),    _fmt(fwd_p['pce']),    hysteresis_str],
+                    [_fmt(rev_p['ff']),     _fmt(fwd_p['ff']),     ''],
+                    [_fmt(rev_jsc_abs),     _fmt(fwd_jsc_abs),     ''],
+                    [_fmt(rev_p['voc'], 3), _fmt(fwd_p['voc'], 3), ''],
+                ],
+                fill_color=[['#d5eae6', '#ebf4f2', '#f0f0f0']],
+                font=dict(size=11),
+                align='center',
+                height=26
+            )
+        ), row=1, col=2)
+
+        title_parts = [p for p in [sample_label, px_str, cycle_str] if p]
+        title_text = ' | '.join(title_parts)
+
+        fig.add_shape(type='line', x0=-0.2, y0=0, x1=2.0, y1=0,
+                      line=dict(color='gray', width=1.5), row=1, col=1)
+        fig.add_shape(type='line', x0=0, y0=-30, x1=0, y1=30,
+                      line=dict(color='gray', width=1.5), row=1, col=1)
+
+        fig.update_layout(
+            title=dict(text=title_text, font=dict(size=13), x=0.0, xanchor='left'),
+            template='plotly_white',
+            width=1100,
+            height=520,
+            legend=dict(
+                x=0.02, y=0.04, xanchor='left', yanchor='bottom',
+                bgcolor='rgba(255,255,255,0.85)',
+                bordercolor='black', borderwidth=1,
+                font=dict(size=11)
+            ),
+            margin=dict(l=65, r=15, t=65, b=60)
+        )
+        fig.update_xaxes(title_text='Voltage [V]',
+                         showgrid=True, gridwidth=1, gridcolor='lightgray',
+                         row=1, col=1)
+        fig.update_yaxes(title_text='Current Density [mA/cm²]',
+                         showgrid=True, gridwidth=1, gridcolor='lightgray',
+                         row=1, col=1)
+        return fig
 
     def _build_download_table_assets(self):
         """Build summary table assets to include in the combined download ZIP."""
