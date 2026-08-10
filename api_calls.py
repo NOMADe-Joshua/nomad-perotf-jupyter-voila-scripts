@@ -561,3 +561,60 @@ def get_efficiencies(url, token, sample_ids):
                               x["archive"]["results"]["properties"]["optoelectronic"]["solar_cell"]["efficiency"]),
                     response.json()["data"]
                    ))
+
+def get_all_xrd(url, token, sample_ids, xrd_type="peroTF_XRD_XY"):
+    """
+    Fetch all XRD measurements for the given sample_ids.
+    Returns a dict keyed by sample lab_id, like the JV/EQE helpers.
+    """
+    query = {
+        "required": {
+            "metadata": "*"
+        },
+        "owner": "visible",
+        "query": {"results.eln.lab_ids:any": sample_ids},
+        "pagination": {
+            "page_size": 10000
+        }
+    }
+    response = requests.post(
+        f"{url}/entries/query",
+        headers={"Authorization": f"Bearer {token}"},
+        json=query,
+    )
+    response.raise_for_status()
+
+    entry_ids = [entry["entry_id"] for entry in response.json()["data"]]
+
+    query = {
+        "required": {
+            "data": "*",
+            "metadata": "*",
+        },
+        "owner": "visible",
+        "query": {
+            "entry_references.target_entry_id:any": entry_ids,
+            "entry_type": xrd_type,
+        },
+        "pagination": {
+            "page_size": 10000
+        }
+    }
+    response = requests.post(
+        f"{url}/entries/archive/query",
+        headers={"Authorization": f"Bearer {token}"},
+        json=query,
+    )
+    response.raise_for_status()
+
+    linked_data = response.json()["data"]
+    res = {}
+    for ldata in linked_data:
+        archive_data = ldata["archive"]["data"]
+        if "samples" not in archive_data or not archive_data["samples"]:
+            continue
+
+        lab_id = archive_data["samples"][0]["lab_id"]
+        res.setdefault(lab_id, []).append((archive_data, ldata["archive"]["metadata"]))
+
+    return res
