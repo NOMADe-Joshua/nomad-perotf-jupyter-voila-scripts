@@ -343,68 +343,75 @@ class DataManager:
                         subbatch = sid_parts[1] if len(sid_parts) >= 3 else ''
                         
                         # Build JV row
-                        row = [
-                            c.get("open_circuit_voltage", 0),
-                            -c.get("short_circuit_current_density", 0),
-                            100 * c.get("fill_factor", 0),
-                            c.get("efficiency", 0),
-                            c.get("potential_at_maximum_power_point", 0),
-                            -c.get("current_density_at_maximun_power_point", 0),
-                            -c.get("potential_at_maximum_power_point", 0) * c.get("current_density_at_maximun_power_point", 0),
-                            c.get("series_resistance", 0),
-                            c.get("shunt_resistance", 0),
-                            sample_clean,
-                            batch_id,
-                            "w",
-                            cell,
-                            direction,
-                            illum,
-                            status,
-                            sid,
-                            subbatch,
-                            px_number,
-                            cycle_number
-                        ]
-                        rows_jvc.append(row)
-                        
-                        # Build voltage row
-                        row_v = [
-                            "_".join(["Voltage (V)", cell, direction, illum]),
-                            sample_clean,
-                            batch_id,
-                            "w",
-                            "Voltage (V)",
-                            cell,
-                            direction,
-                            illum,
-                            sid,
-                            status,
-                            px_number,
-                            cycle_number
-                        ]
-                        voltage_data = c.get("voltage", []) + [None] * (max_data_points - len(c.get("voltage", [])))
-                        row_v.extend(voltage_data)
-                        
-                        # Build current row
-                        row_j = [
-                            "_".join(["Current Density(mA/cm2)", cell, direction, illum]),
-                            sample_clean,
-                            batch_id,
-                            "w",
-                            "Current Density(mA/cm2)",
-                            cell,
-                            direction,
-                            illum,
-                            sid,
-                            status,
-                            px_number,
-                            cycle_number
-                        ]
-                        current_data = c.get("current_density", []) + [None] * (max_data_points - len(c.get("current_density", [])))
-                        row_j.extend(current_data)
-                        
-                        rows_cur.append(row_v)
-                        rows_cur.append(row_j)
+                        try: 
+                            row = [
+                                c.get("open_circuit_voltage", 0),
+                                -c.get("short_circuit_current_density", 0),
+                                100 * c.get("fill_factor", 0),
+                                c.get("efficiency", 0),
+                                c.get("potential_at_maximum_power_point", 0),
+                                -c.get("current_density_at_maximun_power_point", 0),
+                                -c.get("potential_at_maximum_power_point", 0) * c.get("current_density_at_maximun_power_point", 0),
+                                c.get("series_resistance", 0),
+                                c.get("shunt_resistance", 0),
+                                sample_clean,
+                                batch_id,
+                                "w",
+                                cell,
+                                direction,
+                                illum,
+                                status,
+                                sid,
+                                subbatch,
+                                px_number,
+                                cycle_number
+                            ]
+                            rows_jvc.append(row)
+                            
+                            # Build voltage row
+                            row_v = [
+                                "_".join(["Voltage (V)", cell, direction, illum]),
+                                sample_clean,
+                                batch_id,
+                                "w",
+                                "Voltage (V)",
+                                cell,
+                                direction,
+                                illum,
+                                sid,
+                                status,
+                                px_number,
+                                cycle_number
+                            ]
+                            voltage_data = c.get("voltage", []) + [None] * (max_data_points - len(c.get("voltage", [])))
+                            row_v.extend(voltage_data)
+                            
+                            # Build current row
+                            row_j = [
+                                "_".join(["Current Density(mA/cm2)", cell, direction, illum]),
+                                sample_clean,
+                                batch_id,
+                                "w",
+                                "Current Density(mA/cm2)",
+                                cell,
+                                direction,
+                                illum,
+                                sid,
+                                status,
+                                px_number,
+                                cycle_number
+                            ]
+                            current_data = c.get("current_density", []) + [None] * (max_data_points - len(c.get("current_density", [])))
+                            row_j.extend(current_data)
+                            
+                            rows_cur.append(row_v)
+                            rows_cur.append(row_j)
+                        except Exception as e:
+                            if output_widget:
+                                with output_widget:
+                                    print(f"❌ Error processing --> if unary NoneType error, your bad sample {sid} break the parser as it just returns None (trash). Good job, Joshua: {e}")
+                                    import traceback
+                                    traceback.print_exc()
         
         except Exception as e:
             if output_widget:

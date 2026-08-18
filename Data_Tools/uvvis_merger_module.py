@@ -164,7 +164,8 @@ def merge_uvvis_files(transmission_content: str, reflection_content: str,
 
 def process_uvvis_files(transmission_files: Dict[str, bytes], 
                         reflection_files: Dict[str, bytes],
-                        pairs: Optional[Dict[str, str]] = None) -> Tuple[bytes, int, List[str]]:
+                        pairs: Optional[Dict[str, str]] = None,
+                        output_names: Optional[Dict[str, str]] = None) -> Tuple[bytes, int, List[str]]:
     """
     Process UV-Vis transmission and reflection files and create merged output.
     
@@ -236,6 +237,8 @@ def process_uvvis_files(transmission_files: Dict[str, bytes],
                     base_name = base_name[:-1]
                 
                 output_filename = f"{base_name}.uvvis.csv"
+                if output_names and trans_file in output_names:
+                    output_filename = output_names[trans_file]
                 zip_file.writestr(output_filename, merged_content)
                 processed += 1
             
