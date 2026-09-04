@@ -214,6 +214,14 @@ class XRDAnalysisApp:
         self._peak_x      = None
         self._peak_y_norm = None
 
+        # Batch selection / XRD-availability search state
+        self._batch_selector      = None   # the inner SelectMultiple from create_batch_selection
+        self._all_batch_options   = []     # unfiltered batch id list
+        self._xrd_search_status   = None
+
+        # Pattern selector keeps (display_label, key) tuples; this list holds the plain keys
+        self._pattern_option_values: list = []
+
         self._build_ui()
         self._setup_callbacks()
         self._auto_authenticate()
@@ -273,6 +281,12 @@ class XRDAnalysisApp:
             layout=widgets.Layout(width="220px"),
             style={"description_width": "60px"},
         )
+        self.display_name_dropdown = widgets.Dropdown(
+            options=["Full name", "Variation", "Sample name"],
+            value="Full name", description="Legend:",
+            layout=widgets.Layout(width="220px"),
+            style={"description_width": "60px"},
+        )
         self.line_width_input = widgets.BoundedFloatText(
             value=1.5, min=0.5, max=6.0, step=0.5,
             description="Line width:",
@@ -296,6 +310,10 @@ class XRDAnalysisApp:
             layout=widgets.Layout(width="440px"),
             style={"description_width": "72px"},
         )
+        self.peak_normalize_cb = widgets.Checkbox(
+            value=True, description="Normalize (0–1)",
+            indent=False, layout=widgets.Layout(width="160px"),
+        )
         self.prominence_input = widgets.BoundedFloatText(
             value=0.05, min=0.001, max=1.0, step=0.005,
             description="Prominence:",
@@ -313,6 +331,12 @@ class XRDAnalysisApp:
             value="Linear", description="Background:",
             layout=widgets.Layout(width="215px"),
             style={"description_width": "90px"},
+        )
+        self.poly_degree_input = widgets.BoundedIntText(
+            value=2, min=0, max=15,
+            description="Degree:",
+            layout=widgets.Layout(width="140px", display="none"),
+            style={"description_width": "55px"},
         )
         self.detect_btn = widgets.Button(
             description="🔍  Detect Peaks",
@@ -389,6 +413,7 @@ class XRDAnalysisApp:
             widgets.HBox([self.offset_cb, self.offset_step]),
             self.log_scale_cb,
             self.color_dropdown,
+            self.display_name_dropdown,
             self.line_width_input,
             widgets.HTML("&nbsp;"),
             self.plot_btn,
@@ -409,12 +434,14 @@ class XRDAnalysisApp:
                 "Gaussian profiles to each peak.</p>"
             ),
             self.ref_pattern_dropdown,
+            self.peak_normalize_cb,
             widgets.HTML("<hr style='margin:8px 0;'>"),
             widgets.HTML("<b>Detection parameters</b>"),
             widgets.HBox([
                 self.prominence_input,
                 self.distance_input,
                 self.bg_model_dropdown,
+                self.poly_degree_input,
             ]),
             widgets.HBox(
                 [self.detect_btn, self.fit_btn],
@@ -452,7 +479,7 @@ class XRDAnalysisApp:
         self.auth_ui.set_success_callback(self._on_auth_success)
         self.select_all_btn.on_click(
             lambda _: setattr(
-                self.pattern_selector, "value", self.pattern_selector.options
+                self.pattern_selector, "value", tuple(self._pattern_option_values)
             )
         )
         self.deselect_all_btn.on_click(
@@ -463,6 +490,34 @@ class XRDAnalysisApp:
         self.fit_btn.on_click(self._on_fit_peaks)
         self.export_html_btn.on_click(self._on_export_html)
         self.export_csv_btn.on_click(self._on_export_csv)
+        self.bg_model_dropdown.observe(self._on_bg_model_change, names="value")
+        self.peak_normalize_cb.observe(self._on_peak_normalize_change, names="value")
+
+    def _on_bg_model_change(self, change):
+        """Show the polynomial-degree input only when it is relevant."""
+        self.poly_degree_input.layout.display = (
+            "flex" if change["new"] == "Polynomial" else "none"
+        )
+
+    def _on_peak_normalize_change(self, change):
+        """Rescale the Prominence bound so it stays usable in both normalized and raw-counts mode."""
+        if change["new"]:
+            self.prominence_input.min   = 0.001
+            self.prominence_input.max   = 1.0
+            self.prominence_input.step  = 0.005
+            if self.prominence_input.value > 1.0:
+                self.prominence_input.value = 0.05
+            return
+
+        ymax = 1.0
+        label = self.ref_pattern_dropdown.value
+        if label and label in self.loaded_patterns:
+            y = self.loaded_patterns[label]["intensity"].astype(float)
+            if y.size:
+                ymax = float(y.max())
+        self.prominence_input.max   = max(ymax, 1.0)
+        self.prominence_input.step  = max(ymax * 0.005, 0.005)
+        self.prominence_input.value = max(ymax * 0.05, 0.05)
 
     def _auto_authenticate(self):
         is_hub = bool(os.environ.get("JUPYTERHUB_USER"))
@@ -491,13 +546,80 @@ class XRDAnalysisApp:
                     self.auth_manager.current_token,
                     self._load_xrd_from_selection,
                 )
-                display(widget)
+                # widget.children == (search_field, batch_ids_selector, load_batch_button)
+                self._batch_selector    = widget.children[1]
+                self._all_batch_options = list(self._batch_selector.options)
+
+                search_xrd_btn = widgets.Button(
+                    description="🔬 Search for XRD",
+                    button_style="info",
+                    tooltip="Scan all listed batches and keep only those that contain XRD data",
+                    layout=widgets.Layout(width="170px"),
+                )
+                search_xrd_btn.on_click(self._on_search_for_xrd)
+                self._xrd_search_status = widgets.Output(
+                    layout=widgets.Layout(margin="4px 0")
+                )
+
+                display(widgets.VBox([
+                    widget,
+                    widgets.HBox([search_xrd_btn], layout=widgets.Layout(margin="6px 0")),
+                    self._xrd_search_status,
+                ]))
             except Exception as exc:
                 print(f"⚠  Could not create batch selector: {exc}")
 
+    def _on_search_for_xrd(self, button=None):
+        """Filter the batch list down to batches that actually contain XRD data.
+
+        Mirrors the proven approach used in MPPT_Analysis: reuse the existing
+        get_ids_in_batch / get_all_xrd calls per batch instead of custom queries.
+        """
+        from api_calls import get_ids_in_batch, get_all_xrd
+
+        if self._batch_selector is None or not self._all_batch_options:
+            return
+
+        url   = self.auth_manager.url
+        token = self.auth_manager.current_token
+        all_batch_ids = list(self._all_batch_options)
+        total = len(all_batch_ids)
+
+        if button is not None:
+            button.disabled = True
+            button.description = "🔄 Searching…"
+
+        valid_batches = []
+        for i, batch_id in enumerate(all_batch_ids):
+            if i % 5 == 0 or i == total - 1:
+                with self._xrd_search_status:
+                    clear_output(wait=True)
+                    print(f"🔍  Progress: {i + 1}/{total} — found {len(valid_batches)} so far")
+                    print(f"   Currently testing: {batch_id}")
+            try:
+                sample_ids = get_ids_in_batch(url, token, [batch_id])
+                if sample_ids and get_all_xrd(url, token, sample_ids):
+                    valid_batches.append(batch_id)
+            except Exception:
+                continue
+
+        self._batch_selector.options = valid_batches
+        self._batch_selector.value   = ()
+
+        with self._xrd_search_status:
+            clear_output(wait=True)
+            if valid_batches:
+                print(f"✅  {len(valid_batches)} of {total} batch(es) contain XRD data.")
+            else:
+                print("❌  None of the listed batches contain XRD data.")
+
+        if button is not None:
+            button.disabled = False
+            button.description = "🔬 Search for XRD"
+
     def _load_xrd_from_selection(self, batch_selector):
         """Fetch XRD entries for all selected batches and populate the app."""
-        from api_calls import get_ids_in_batch, get_all_xrd
+        from api_calls import get_ids_in_batch, get_all_xrd, get_sample_description
 
         batch_ids = list(batch_selector.value) if batch_selector.value else []
         self.selected_batch_ids = batch_ids
@@ -542,6 +664,12 @@ class XRDAnalysisApp:
 
             xrd_raw = get_all_xrd(url, token, all_sample_ids)
 
+            # Variation names ("identifier"/description), same source as JV-Analysis
+            try:
+                identifiers = get_sample_description(url, token, all_sample_ids)
+            except Exception:
+                identifiers = {}
+
             # Parse and store patterns
             self.loaded_patterns = {}
             skipped = 0
@@ -563,6 +691,7 @@ class XRDAnalysisApp:
                         "sample_id": lab_id,
                         "upload":    upload,
                         "mainfile":  metadata.get("mainfile", ""),
+                        "variation": identifiers.get(lab_id, "No variation specified"),
                     }
 
             n = len(self.loaded_patterns)
@@ -588,9 +717,14 @@ class XRDAnalysisApp:
                     return
 
             labels = sorted(self.loaded_patterns.keys())
-            self.pattern_selector.options = labels
+            self._pattern_option_values = labels
+            pattern_options = [
+                (f"{lbl} | {self.loaded_patterns[lbl]['variation']}", lbl)
+                for lbl in labels
+            ]
+            self.pattern_selector.options = pattern_options
             self.pattern_selector.value   = tuple(labels[: min(8, len(labels))])
-            self.ref_pattern_dropdown.options = labels
+            self.ref_pattern_dropdown.options = pattern_options
             self.ref_pattern_dropdown.value   = labels[0] if labels else None
             self.tabs.selected_index = 1
 
@@ -609,6 +743,18 @@ class XRDAnalysisApp:
             return list(palette[:n])
         return [palette[i % len(palette)] for i in range(n)]
 
+    def _get_display_name(self, label: str, mode: str = "Full name") -> str:
+        """Build the legend/trace name for a pattern, depending on the chosen mode."""
+        p = self.loaded_patterns.get(label, {})
+        sample_id = p.get("sample_id", label)
+        if mode == "Variation":
+            return p.get("variation") or "No variation specified"
+        if mode == "Sample name":
+            suffix = label[len(sample_id):]  # e.g. "_m2" for repeated measurements
+            base = sample_id.split("_")[-1]
+            return f"{base}{suffix}"
+        return label  # "Full name"
+
     def _on_plot(self, _b=None):
         selected = list(self.pattern_selector.value)
         if not selected:
@@ -625,11 +771,13 @@ class XRDAnalysisApp:
         colors     = self._color_palette(len(selected))
 
         fig = go.Figure()
+        legend_mode = self.display_name_dropdown.value
 
         for idx, label in enumerate(selected):
             p = self.loaded_patterns[label]
             x = p["two_theta"]
             y = p["intensity"].astype(float)
+            display_name = self._get_display_name(label, legend_mode)
 
             if normalize:
                 ymax = y.max()
@@ -642,10 +790,10 @@ class XRDAnalysisApp:
             fig.add_trace(go.Scatter(
                 x=x, y=y,
                 mode="lines",
-                name=label,
+                name=display_name,
                 line=dict(color=colors[idx], width=lw),
                 hovertemplate=(
-                    f"<b>{label}</b><br>"
+                    f"<b>{display_name}</b><br>"
                     "2θ: %{x:.3f}°<br>"
                     "I: %{y:.4f}<extra></extra>"
                 ),
@@ -689,8 +837,11 @@ class XRDAnalysisApp:
         p = self.loaded_patterns[label]
         x = p["two_theta"]
         y = p["intensity"].astype(float)
-        ymax = y.max()
-        y_norm = y / ymax if ymax > 0 else y
+        if self.peak_normalize_cb.value:
+            ymax = y.max()
+            y_norm = y / ymax if ymax > 0 else y
+        else:
+            y_norm = y
 
         try:
             peaks = self.fitting_engine.detect_peaks(
@@ -718,8 +869,9 @@ class XRDAnalysisApp:
                 print(f"Peak detection failed: {exc}")
 
     def _draw_peak_plot(self, label, x, y_norm, peaks, fit_result=None):
-        """Render normalised pattern with peak markers and optional fit overlay."""
+        """Render the pattern (normalised or raw, per the checkbox) with peak markers and optional fit overlay."""
         fig = go.Figure()
+        intensity_label = "Normalised Intensity" if self.peak_normalize_cb.value else "Intensity (counts)"
 
         fig.add_trace(go.Scatter(
             x=x, y=y_norm,
@@ -739,21 +891,31 @@ class XRDAnalysisApp:
                 for ci, (cname, cvals) in enumerate(
                     fit_result.eval_components().items()
                 ):
-                    if not cname.startswith("p"):
-                        continue  # skip background components
-                    fig.add_trace(go.Scatter(
-                        x=x, y=cvals,
-                        mode="lines",
-                        name=cname,
-                        line=dict(
-                            color=_COMPONENT_COLORS[ci % len(_COMPONENT_COLORS)],
-                            width=1.5, dash="dot",
-                        ),
-                    ))
+                    if cname.startswith("p"):
+                        fig.add_trace(go.Scatter(
+                            x=x, y=cvals,
+                            mode="lines",
+                            name=cname,
+                            line=dict(
+                                color=_COMPONENT_COLORS[ci % len(_COMPONENT_COLORS)],
+                                width=1.5, dash="dot",
+                            ),
+                        ))
+                    else:
+                        # background component (e.g. "bg_") — show it so it's
+                        # visible that it is actually fitted to the baseline
+                        fig.add_trace(go.Scatter(
+                            x=x, y=cvals,
+                            mode="lines",
+                            name="Background",
+                            line=dict(color="rgba(90,90,90,0.9)", width=1.5, dash="dashdot"),
+                        ))
 
         if peaks:
+            y_span = float(np.max(y_norm) - np.min(y_norm)) if len(y_norm) else 0.0
+            marker_offset = 0.04 * y_span if y_span > 0 else 0.04
             pk_x   = [pk["center"] for pk in peaks]
-            pk_y   = [pk["height"] + 0.04 for pk in peaks]
+            pk_y   = [pk["height"] + marker_offset for pk in peaks]
             pk_txt = [f"{pk['center']:.3f}°" for pk in peaks]
             fig.add_trace(go.Scatter(
                 x=pk_x, y=pk_y,
@@ -769,7 +931,7 @@ class XRDAnalysisApp:
         fig.update_layout(
             title=f"Peak Analysis — {label}",
             xaxis_title="2θ (°)",
-            yaxis_title="Normalised Intensity",
+            yaxis_title=intensity_label,
             template="plotly_white",
             height=520,
             legend=dict(
@@ -797,11 +959,12 @@ class XRDAnalysisApp:
                 return
 
             rows = []
+            height_col = "Height (norm.)" if self.peak_normalize_cb.value else "Height (counts)"
             for i, pk in enumerate(peaks):
                 row = {
                     "Peak": i + 1,
                     "2θ detected (°)": f"{pk['center']:.4f}",
-                    "Height (norm.)":  f"{pk['height']:.4f}",
+                    height_col:         f"{pk['height']:.4f}",
                     "FWHM est. (°)":   f"{pk.get('sigma', 0) * 2.355:.4f}",
                 }
                 if fit_result is not None:
@@ -855,7 +1018,7 @@ class XRDAnalysisApp:
             self.fitting_engine.create_fit_parameters(
                 peak_models,
                 background_model=self.bg_model_dropdown.value,
-                poly_degree=2,
+                poly_degree=self.poly_degree_input.value,
             )
             result = self.fitting_engine.fit_current_spectrum(x, y_norm)
             self._draw_peak_plot(label, x, y_norm,

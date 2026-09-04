@@ -16,6 +16,60 @@ from utils import debug_print
 
 
 # =============================================================================
+# HIGH-ORDER POLYNOMIAL BACKGROUND
+# =============================================================================
+# lmfit's built-in PolynomialModel hard-caps `degree` at 7 (MAX_DEGREE = 7) and
+# uses a raw power-series basis (c0 + c1*x + c2*x^2 + ...), which becomes
+# numerically ill-conditioned well before that anyway once x spans a wide
+# 2-theta range. This model instead uses a Chebyshev basis on x rescaled to
+# [-1, 1], which stays well-conditioned to much higher orders and lets the
+# user pick a degree beyond 7 for the XRD background.
+_CHEBYSHEV_MAX_DEGREE = 15
+
+
+def _chebyshev_background(x, c0=0.0, c1=0.0, c2=0.0, c3=0.0, c4=0.0, c5=0.0, c6=0.0, c7=0.0,
+                           c8=0.0, c9=0.0, c10=0.0, c11=0.0, c12=0.0, c13=0.0, c14=0.0, c15=0.0):
+    """Chebyshev polynomial evaluated on x rescaled to [-1, 1]; a module-level
+    function (rather than a closure) so it stays picklable for ProcessPoolExecutor."""
+    x = np.asarray(x, dtype=float)
+    xmin, xmax = np.min(x), np.max(x)
+    span = (xmax - xmin) or 1.0
+    x_norm = 2.0 * (x - xmin) / span - 1.0
+    coefs = [c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15]
+    return np.polynomial.chebyshev.chebval(x_norm, coefs)
+
+
+class ChebyshevBackgroundModel(Model):
+    """Background model of arbitrary degree, built on a Chebyshev polynomial basis."""
+
+    MAX_DEGREE = _CHEBYSHEV_MAX_DEGREE
+    DEGREE_ERR = f"degree must be an integer between 0 and {MAX_DEGREE}."
+
+    def __init__(self, degree=7, independent_vars=['x'], prefix='',
+                 nan_policy='raise', **kwargs):
+        if not isinstance(degree, int) or degree < 0 or degree > self.MAX_DEGREE:
+            raise ValueError(self.DEGREE_ERR)
+        self.poly_degree = degree
+        pnames = [f'c{i}' for i in range(degree + 1)]
+
+        kwargs.update({'prefix': prefix, 'nan_policy': nan_policy,
+                       'independent_vars': independent_vars, 'param_names': pnames})
+        super().__init__(_chebyshev_background, **kwargs)
+
+    def guess(self, data, x, **kwargs):
+        """Estimate initial coefficients via a Chebyshev least-squares fit."""
+        pars = self.make_params()
+        x = np.asarray(x, dtype=float)
+        xmin, xmax = np.min(x), np.max(x)
+        span = (xmax - xmin) or 1.0
+        x_norm = 2.0 * (x - xmin) / span - 1.0
+        coefs = np.polynomial.chebyshev.chebfit(x_norm, np.asarray(data, dtype=float), self.poly_degree)
+        for i, c in enumerate(coefs):
+            pars[f'{self.prefix}c{i}'].set(value=c)
+        return pars
+
+
+# =============================================================================
 # PEAK DETECTION
 # =============================================================================
 
@@ -378,11 +432,24 @@ class FittingModels:
         
         self.available_background_models = {
             'Linear': LinearModel,
-            'Polynomial': PolynomialModel,
+            'Polynomial': ChebyshevBackgroundModel,
             'Exponential': ExponentialModel
         }
-        
-    def create_composite_model(self, fit_params):
+
+    @staticmethod
+    def _background_mask(x, peak_models):
+        """Boolean mask selecting baseline points, i.e. points far from any peak center."""
+        mask = np.ones_like(x, dtype=bool)
+        for pk in peak_models or []:
+            center = pk.get('center')
+            if center is None:
+                continue
+            half_width = pk.get('center_tol') or (pk.get('sigma', 0) * 4) or 1.0
+            half_width = max(float(half_width), 1e-6)
+            mask &= np.abs(x - center) > half_width
+        return mask
+
+    def create_composite_model(self, fit_params, x=None, y=None):
         """
         Create a composite model based on the fitting parameters
         
@@ -390,6 +457,10 @@ class FittingModels:
         -----------
         fit_params : dict
             Dictionary containing model parameters
+        x : array, optional
+            Independent variable values, used to seed/bound the background model
+        y : array, optional
+            Data values, used to seed/bound the background model
             
         Returns:
         --------
@@ -401,8 +472,9 @@ class FittingModels:
         
         # Add background model
         if fit_params['background_model'] != 'None':
+            poly_degree = fit_params.get('poly_degree', 2)
             if fit_params['background_model'] == 'Polynomial':
-                bg_model = PolynomialModel(degree=fit_params['poly_degree'], prefix='bg_')
+                bg_model = ChebyshevBackgroundModel(degree=poly_degree, prefix='bg_')
             elif fit_params['background_model'] == 'Linear':
                 bg_model = LinearModel(prefix='bg_')
             elif fit_params['background_model'] == 'Exponential':
@@ -411,7 +483,38 @@ class FittingModels:
                 bg_model = LinearModel(prefix='bg_')  # Default fallback
                 
             model = bg_model
-            params.update(bg_model.make_params())
+
+            # Seed with a real fit on the *baseline* points (peak regions masked out)
+            # so the guess isn't dragged upward by the peaks themselves; this is what
+            # makes the background actually follow the data instead of sitting near 0.
+            bg_params = None
+            if x is not None and y is not None:
+                x_arr = np.asarray(x, dtype=float)
+                y_arr = np.asarray(y, dtype=float)
+                mask = self._background_mask(x_arr, fit_params.get('peak_models', []))
+                try:
+                    if mask is not None and mask.sum() >= poly_degree + 2:
+                        bg_params = bg_model.guess(y_arr[mask], x=x_arr[mask])
+                    else:
+                        bg_params = bg_model.guess(y_arr, x=x_arr)
+                except Exception:
+                    bg_params = None
+            if bg_params is None:
+                bg_params = bg_model.make_params()
+
+            # Bound background coefficients relative to the data magnitude so a single
+            # optimizer step can't blow the curve up to +/-inf. The Chebyshev basis is
+            # already well-conditioned (each term is O(1) on the rescaled x-range), so
+            # a single generous, degree-independent bound is enough here.
+            if fit_params['background_model'] == 'Polynomial':
+                y_scale = float(np.max(np.abs(y))) if y is not None and len(y) else 1.0
+                bound = max(50.0 * y_scale, 10.0)
+                for j in range(poly_degree + 1):
+                    pname = f'bg_c{j}'
+                    if pname in bg_params:
+                        bg_params[pname].set(min=-bound, max=bound)
+
+            params.update(bg_params)
             
         # Add peak models
         # Add peak models
@@ -501,8 +604,8 @@ class FittingModels:
         --------
         ModelResult: Fitting result
         """
-        # Create composite model
-        model, params = self.create_composite_model(fit_params)
+        # Create composite model (x/y are used to seed and bound the background model)
+        model, params = self.create_composite_model(fit_params, x=wavelengths, y=intensities)
         
         if model is None:
             raise ValueError("Model creation failed")
