@@ -693,6 +693,7 @@ class PlotUI:
                 ("Boxplot", "Voc", "by Variable"), 
                 ("Boxplot", "Jsc", "by Variable"), 
                 ("Boxplot", "FF", "by Variable"), 
+                ("Boxplot", "Hysteresis", "by Variable"), 
                 ("JV Curve", "Best device per condition", ""),
                 ("Boxplot", "all", "by Variable")  # Added
             ],
@@ -792,7 +793,7 @@ class PlotUI:
         
         if plot_type == 'Boxplot':
             # ADD 'all' to the beginning of the options list
-            option1_dropdown.options = ['all', 'Voc', 'Jsc', 'FF', 'PCE', 'R_ser', 'R_shu', 'V_mpp', 'J_mpp', 'P_mpp']
+            option1_dropdown.options = ['all', 'Voc', 'Jsc', 'FF', 'Hysteresis', 'PCE', 'R_ser', 'R_shu', 'V_mpp', 'J_mpp', 'P_mpp']
             # Option 2 is ALWAYS the same for boxplots - this is CORRECT
             option2_dropdown.options = ['by Batch', 'by Variable', 'by Sample', 'by Cell', 'by Scan Direction', 'by Subbatch']
         elif plot_type == 'JV Curve':

@@ -109,7 +109,7 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
                 break
 
         # Determine var_y normally (single-char JV param code)
-        vary_dict = {"v": "voc", "j": "jsc", "f": "ff", "p": "pce", "u": "vmpp", "i": "jmpp", "m": "pmpp", "r": "rser", "h": "rshu"}
+        vary_dict = {"v": "voc", "j": "jsc", "f": "ff", "p": "pce", "u": "vmpp", "i": "jmpp", "m": "pmpp", "r": "rser", "h": "rshu", "y": "hysteresis"}
         var_y = next((vary_dict[key] for key in vary_dict if key in parse_code), None)
 
         # CRITICAL: Initialize fig and fig_name to None at start of each iteration
@@ -125,7 +125,13 @@ def plotting_string_action(plot_list, data, supp, is_voila=False, color_scheme=N
                     "data", colors=color_scheme,
                     separate_scan_dir=separate_scan_dir
                 )
-            # Regular boxplots
+            # Regular boxplots (hysteresis merges Forward/Reverse into one value per device)
+            elif "B" in pl and var_x and var_y == "hysteresis":
+                fig, fig_name, wb, title_text, subtitle = plot_manager.create_hysteresis_boxplot(
+                    filtered_jv, var_x,
+                    [omitted_jv, filter_pars],
+                    "data", colors=color_scheme
+                )
             elif "B" in pl and var_x and var_y:
                 fig, fig_name, wb, title_text, subtitle = plot_manager.create_boxplot(
                     filtered_jv, var_x, var_y,
@@ -214,6 +220,7 @@ def plot_list_from_voila(plot_list):
         'Voc': 'v',
         'Jsc': 'j',
         'FF': 'f',
+        'Hysteresis': 'y',
         'PCE': 'p',
         'R_ser': 'r',
         'R_shu': 'h',
@@ -1888,6 +1895,155 @@ class PlotManager:
 
         return fig, fig_name, None, title_text, ""
     
+    def _build_hysteresis_dataframe(self, data):
+        """Collapse each sample's Forward/Reverse row-pair into one hysteresis value: (PCE_rev - PCE_fwd) / PCE_rev."""
+        if data is None or data.empty or 'direction' not in data.columns or 'PCE(%)' not in data.columns:
+            return pd.DataFrame()
+
+        df = data.copy()
+        if 'ilum' in df.columns:
+            df = df[df['ilum'] != 'Dark']
+        if df.empty:
+            return pd.DataFrame()
+
+        group_cols = [c for c in ['sample', 'cell', 'px_number', 'cycle_number'] if c in df.columns]
+        if not group_cols:
+            return pd.DataFrame()
+
+        carry_cols = ['condition', 'batch', 'batch_for_plotting', 'subbatch', 'status', 'sample_id']
+
+        rows = []
+        for keys, group in df.groupby(group_cols, dropna=False):
+            if not isinstance(keys, tuple):
+                keys = (keys,)
+            key_dict = dict(zip(group_cols, keys))
+
+            rev = group[group['direction'] == 'Reverse']
+            fwd = group[group['direction'] == 'Forward']
+            if rev.empty or fwd.empty:
+                continue  # need both scan directions to form a hysteresis value
+
+            rev_row = rev.sort_values('PCE(%)').iloc[-1]
+            fwd_row = fwd.sort_values('PCE(%)').iloc[-1]
+
+            rev_pce = rev_row['PCE(%)']
+            fwd_pce = fwd_row['PCE(%)']
+            if pd.isna(rev_pce) or pd.isna(fwd_pce) or rev_pce == 0:
+                continue
+
+            row = {
+                'hysteresis':  (rev_pce - fwd_pce) / rev_pce,
+                'PCE_reverse': rev_pce,
+                'PCE_forward': fwd_pce,
+                **key_dict,
+            }
+            for col in carry_cols:
+                if col in rev_row.index:
+                    row[col] = rev_row[col]
+            rows.append(row)
+
+        return pd.DataFrame(rows)
+
+    def create_hysteresis_boxplot(self, data, var_x, other_data, data_type="data", colors=None):
+        """Boxplot of hysteresis = (PCE_reverse - PCE_forward) / PCE_reverse, one box per x-tick (directions are already merged)."""
+        var_x_map = {
+            'sample': 'sample', 'cell': 'cell',
+            'ilum': 'ilum', 'batch': 'batch_for_plotting', 'condition': 'condition',
+            'status': 'status', 'subbatch': 'subbatch'
+        }
+        name_x = var_x_map.get(var_x, var_x)
+
+        hyst_df = self._build_hysteresis_dataframe(data)
+        if hyst_df.empty or name_x not in hyst_df.columns:
+            print(f"⚠️ Warning: could not build hysteresis data for grouping column '{name_x}' "
+                  f"('by Scan Direction' is not applicable to Hysteresis, since it merges both directions).")
+            return None, "", None, "", ""
+
+        fig = go.Figure()
+        group_keys = list(hyst_df[name_x].unique())
+        num_categories = len(group_keys)
+        distributed_colors = self._get_intelligent_colors(group_keys, num_categories, color_scheme=colors)
+
+        for i, key in enumerate(group_keys):
+            group_data = hyst_df[hyst_df[name_x] == key]
+            if group_data.empty:
+                continue
+
+            hover_data = []
+            for _, row_data in group_data.iterrows():
+                hover_data.append([
+                    row_data.get('condition', row_data.get(name_x, 'N/A')),
+                    row_data.get('sample', 'N/A'),
+                    row_data.get('batch_for_plotting', row_data.get('batch', 'N/A')),
+                    row_data.get('cell', 'N/A'),
+                    row_data.get('PCE_reverse', float('nan')),
+                    row_data.get('PCE_forward', float('nan')),
+                ])
+
+            color = distributed_colors[i]
+            fig.add_trace(go.Box(
+                y=group_data['hysteresis'] * 100.0,
+                name=str(key),
+                x=[str(key)] * len(group_data),
+                boxpoints='all',
+                pointpos=0,
+                jitter=0.5,
+                whiskerwidth=0.4,
+                marker=dict(size=4, opacity=0.7, color='rgba(0,0,0,0.7)'),
+                line=dict(width=1.5, color='black'),
+                fillcolor=color,
+                boxmean=True,
+                width=0.8,
+                legendgroup=str(key),
+                customdata=hover_data,
+                hovertemplate='<b>%{customdata[0]}</b><br>' +
+                            'Sample: %{customdata[1]}<br>' +
+                            'Upload: %{customdata[2]}<br>' +
+                            'Cell: %{customdata[3]}<br>' +
+                            'PCE Reverse: %{customdata[4]:.2f}%<br>' +
+                            'PCE Forward: %{customdata[5]:.2f}%<br>' +
+                            'Hysteresis: %{y:.2f}%<br>' +
+                            '<extra></extra>'
+            ))
+
+        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+
+        x_axis_display = str(name_x or 'variable').replace('_', ' ').title()
+        if name_x == 'condition':
+            x_axis_display = 'Variable'
+        elif name_x == 'batch_for_plotting':
+            x_axis_display = 'Batch'
+
+        title_text = f"Boxplot of {x_axis_display} by Hysteresis"
+        if data_type == "junk":
+            title_text += " (Filtered Out Data)"
+
+        fig.update_layout(
+            title=dict(text=title_text, x=0.5, xanchor='center', font=dict(size=self.font_size_title, color='black')),
+            template="plotly_white",
+            showlegend=False,
+            width=1400,
+            height=700,
+            margin=dict(l=80, r=200, t=130, b=130),
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            hovermode='closest',
+            xaxis=dict(titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis)),
+            yaxis=dict(title='Hysteresis (%)', titlefont=dict(size=self.font_size_axis), tickfont=dict(size=self.font_size_axis))
+        )
+
+        if len(group_keys) > 4:
+            fig.update_xaxes(tickangle=-45)
+
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+
+        fig_name = f"Boxplot_Hysteresis_by_{name_x}"
+        if data_type == "junk":
+            fig_name += "_filtered_out"
+        fig_name += ".html"
+
+        return fig, fig_name, None, title_text, ""
+
     def _lighten_rgba(self, rgba_str, factor=0.3):
         r, g, b, a = self._extract_rgb_from_color(rgba_str)
         r = min(255, int(r + (255 - r) * factor))

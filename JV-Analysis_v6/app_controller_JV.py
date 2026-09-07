@@ -1102,7 +1102,8 @@ If you tested specific variables or conditions for each sample, please write the
                     
                     if plot_type == 'Boxplot':
                         # Generate title and subtitle for boxplot
-                        direction_note = " (Separated by Scan Direction)" if separate_scan_dir else ""
+                        # Hysteresis always merges Forward/Reverse into one value, so the split note doesn't apply
+                        direction_note = " (Separated by Scan Direction)" if (separate_scan_dir and option1 != 'Hysteresis') else ""
                         datatype = "data"
                         
                         # CRITICAL FIX: Handle 'all' option where option1='all' and option2 contains the x-axis variable
