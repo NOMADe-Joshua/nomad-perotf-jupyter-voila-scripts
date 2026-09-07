@@ -199,6 +199,7 @@ class XRDAnalysisApp:
 
     BASE_URL     = "http://elnserver.lti.kit.edu"
     API_ENDPOINT = "/nomad-oasis/api/v1"
+    ITO_REFERENCE_2THETA = 30.562  # default 2θ calibration target (ITO substrate peak)
 
     # ── init ─────────────────────────────────────────────────────────────────
 
@@ -213,6 +214,7 @@ class XRDAnalysisApp:
         self._peak_label  = ""
         self._peak_x      = None
         self._peak_y_norm = None
+        self._last_fit_result = None   # most recent lmfit ModelResult, used to seed 2θ calibration
 
         # Batch selection / XRD-availability search state
         self._batch_selector      = None   # the inner SelectMultiple from create_batch_selection
@@ -361,6 +363,25 @@ class XRDAnalysisApp:
             )
         )
 
+        # ── 2θ calibration (e.g. align to a known ITO reference peak) ─────────
+        self.calib_peak_dropdown = widgets.Dropdown(
+            options=[], description="Peak:",
+            layout=widgets.Layout(width="260px"),
+            style={"description_width": "50px"},
+        )
+        self.calib_target_input = widgets.BoundedFloatText(
+            value=0.0, min=-180.0, max=180.0, step=0.001,
+            description="Target 2θ (°):",
+            layout=widgets.Layout(width="190px"),
+            style={"description_width": "100px"},
+        )
+        self.calib_apply_btn = widgets.Button(
+            description="🎯  Apply Shift",
+            button_style="info",
+            layout=widgets.Layout(width="150px", height="34px"),
+        )
+        self.calib_status = widgets.Output(layout=widgets.Layout(margin="4px 0"))
+
         # ── Tab 3 : Export ────────────────────────────────────────────────────
         self.export_html_btn = widgets.Button(
             description="💾  Download Plot (HTML)",
@@ -450,6 +471,20 @@ class XRDAnalysisApp:
             self.peak_plot_output,
             widgets.HTML("<b>Peak parameters</b>"),
             self.peak_table_output,
+            widgets.HTML("<hr style='margin:8px 0;'>"),
+            widgets.HTML("<b>2θ Calibration</b>"),
+            widgets.HTML(
+                "<p style='color:#555; margin:0 0 8px 0;'>"
+                "Normalize your XRD data to a specific reference peak (typically the ITO substrate peak). "
+                "Check the reference: <a href='https://doi.org/10.1006/jssc.1997.7613' target='_blank'>10.1006/jssc.1997.7613</a>. "
+                "At 298K the highest intensity ITO peak is at 30.562°.</p>"
+            ),
+            widgets.HBox([
+                self.calib_peak_dropdown,
+                self.calib_target_input,
+                self.calib_apply_btn,
+            ]),
+            self.calib_status,
         ])
 
         # ── Tab 3 ─────────────────────────────────────────────────────────────
@@ -488,6 +523,7 @@ class XRDAnalysisApp:
         self.plot_btn.on_click(self._on_plot)
         self.detect_btn.on_click(self._on_detect_peaks)
         self.fit_btn.on_click(self._on_fit_peaks)
+        self.calib_apply_btn.on_click(self._on_apply_calibration)
         self.export_html_btn.on_click(self._on_export_html)
         self.export_csv_btn.on_click(self._on_export_csv)
         self.bg_model_dropdown.observe(self._on_bg_model_change, names="value")
@@ -577,7 +613,7 @@ class XRDAnalysisApp:
         """
         from api_calls import get_ids_in_batch, get_all_xrd
 
-        if self._batch_selector is None or not self._all_batch_options:
+        if self._batch_selector is None or self._xrd_search_status is None or not self._all_batch_options:
             return
 
         url   = self.auth_manager.url
@@ -853,8 +889,10 @@ class XRDAnalysisApp:
             self._peak_label     = label
             self._peak_x         = x
             self._peak_y_norm    = y_norm
+            self._last_fit_result = None  # a prior fit no longer matches the (re-)detected peaks
 
             self.fit_btn.disabled = len(peaks) == 0
+            self._update_calibration_dropdown(peaks)
 
             self._draw_peak_plot(label, x, y_norm, peaks)
             self._draw_peak_table(peaks)
@@ -1021,6 +1059,7 @@ class XRDAnalysisApp:
                 poly_degree=self.poly_degree_input.value,
             )
             result = self.fitting_engine.fit_current_spectrum(x, y_norm)
+            self._last_fit_result = result
             self._draw_peak_plot(label, x, y_norm,
                                   self._detected_peaks, fit_result=result)
             self._draw_peak_table(self._detected_peaks, fit_result=result)
@@ -1030,6 +1069,71 @@ class XRDAnalysisApp:
                 clear_output(wait=True)
                 print(f"Fitting failed: {exc}")
                 traceback.print_exc()
+
+    def _update_calibration_dropdown(self, peaks):
+        """Refresh the 2θ-calibration peak selector, defaulting to the peak closest to the ITO reference."""
+        if not peaks:
+            self.calib_peak_dropdown.options = []
+            self.calib_peak_dropdown.value   = None
+            return
+        self.calib_peak_dropdown.options = [
+            (f"Peak {i + 1} (2θ={pk['center']:.3f}°)", i) for i, pk in enumerate(peaks)
+        ]
+        closest_idx = min(
+            range(len(peaks)),
+            key=lambda i: abs(peaks[i]["center"] - self.ITO_REFERENCE_2THETA),
+        )
+        self.calib_peak_dropdown.value = closest_idx
+        self.calib_target_input.value  = self.ITO_REFERENCE_2THETA
+
+    def _on_apply_calibration(self, _b=None):
+        """Shift the whole pattern (and its detected peaks) so the chosen peak lands on the target 2θ."""
+        idx = self.calib_peak_dropdown.value
+        if not self._detected_peaks or idx is None or idx >= len(self._detected_peaks):
+            with self.calib_status:
+                clear_output(wait=True)
+                print("Please detect peaks and select one to align first.")
+            return
+
+        label = self._peak_label
+        if not label or label not in self.loaded_patterns:
+            with self.calib_status:
+                clear_output(wait=True)
+                print("No pattern selected.")
+            return
+
+        # Prefer the fitted center (more precise) if a fit for this peak set already exists
+        current_center = float(self._detected_peaks[idx]["center"])
+        if self._last_fit_result is not None:
+            fitted_center = self._last_fit_result.params.get(f"p{idx}_center")
+            if fitted_center is not None:
+                current_center = float(fitted_center.value)
+
+        target = float(self.calib_target_input.value)
+        shift  = target - current_center
+
+        if abs(shift) < 1e-9:
+            with self.calib_status:
+                clear_output(wait=True)
+                print("Shift is 0° — nothing to do.")
+            return
+
+        pattern = self.loaded_patterns[label]
+        pattern["two_theta"] = pattern["two_theta"] + shift
+        pattern["shift_deg"] = pattern.get("shift_deg", 0.0) + shift
+
+        with self.calib_status:
+            clear_output(wait=True)
+            print(
+                f"✅  Shifted '{label}' by {shift:+.4f}° "
+                f"(peak {current_center:.4f}° → {target:.4f}°). "
+                f"Cumulative shift: {pattern['shift_deg']:+.4f}°."
+            )
+            print("Re-detecting peaks on the corrected pattern…")
+
+        # Re-detect on the corrected data — refreshes plot/table/fit button and
+        # invalidates the stale fit result from before the shift.
+        self._on_detect_peaks()
 
     # ── export ────────────────────────────────────────────────────────────────
 
