@@ -2097,8 +2097,17 @@ If you tested specific variables or conditions for each sample, please write the
             )
             
             if not export_df.empty:
+                # Use the same variation order as the "Reorder Variables for
+                # Boxplots" widget, so the xlsx export and the app's own plots
+                # list variations in the same order.
+                try:
+                    variable_order = self.plot_ui.get_variable_order()
+                except Exception:
+                    variable_order = None
+
                 # Generate Excel workbook
-                detail_wb = generate_detailed_export_excel(export_df, filtered_info=None)
+                detail_wb = generate_detailed_export_excel(export_df, filtered_info=None,
+                                                             variable_order=variable_order)
                 
                 # Convert to bytes
                 detail_bytes_io = io.BytesIO()
