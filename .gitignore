@@ -177,3 +177,7 @@ cython_debug/
 *.txt
 !uploads/analysis-tools-mr60amaQRZ-Ta21fXdf64Q/Excel_creator/templates/process_templates.json
 secrets.py
+
+# graphify local artifacts
+graphify-out/cache/
+graphify-out/graph.html
