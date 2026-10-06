@@ -1,12 +1,12 @@
 # Graph Report - nomad-perotf-jupyter-voila-scripts  (2026-10-05)
 
 ## Corpus Check
-- 89 files · ~146,538 words
+- 89 files · ~146,235 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 68 file(s) not represented in the graph (top: .ipynb 64, (none) 1, .csv 1)
 
 ## Summary
-- 2671 nodes · 4266 edges · 170 communities (43 shown, 127 thin omitted)
+- 2670 nodes · 4265 edges · 166 communities (37 shown, 129 thin omitted)
 - Extraction: 97% EXTRACTED · 3% INFERRED · 0% AMBIGUOUS · INFERRED: 113 edges (avg confidence: 0.89)
 - Token cost: 0 input · 0 output
 
@@ -22,7 +22,7 @@
 - app_controller_JV.py
 - AbsPLGUIComponents
 - ValidationUtils
-- AuthenticationUI
+- AbsPLAppController
 - DoEApplication
 - ColorSchemeSelector
 - utils_JV.py
@@ -39,13 +39,12 @@
 - JVAnalysisApp
 - FilterUI
 - GUILayouts
-- PLAnalysisApp
-- app_controller_ProcessJV.py
+- os
 - PlotUI
 - PLExportUtils
 - UVVisAnalysisApp
 - ResultExporter
-- iv_converter_module.py
+- io
 - SamplingEngine
 - EQEAnalysisApp
 - UVVisPlotManager
@@ -70,7 +69,7 @@
 - ColorSchemeSelector
 - ResizablePlotManager
 - XRDAnalysisApp
-- DesignOfExperiments/utils.py
+- generate_detailed_export_excel
 - ._load_data_from_selection
 - GUIComponents
 - DebugLogger
@@ -82,9 +81,8 @@
 - plot_manager_JV.py
 - MathUtils
 - PLDataLoader
-- plot_manager_ProcessJV.py
-- io
-- eqe_split_module.py
+- plotting_string_action
+- process_eqe_file
 - AuthenticationUI
 - ._create_condition_selector
 - SaveUI
@@ -92,18 +90,18 @@
 - UVVisDiagnosticHelper
 - XRD_PF/utils.py
 - DataManager
-- ResizablePlotManager
+- .display
 - SimpleAuthManager
 - UVVisBatchSelector
 - SimpleAuthManager
 - AbsPL: Sweep vs. Single PL – Unterscheidung
 - SimpleAuthManager
-- zipfile
+- AuthenticationUI
 - generate_jv_pptx_bytes
 - MPPT Analysis Tool - User Manual
 - UVVisDataManager
 - H5DataLoader
-- DesignOfExperiments/data_manager.py
+- PLAnalysisApp
 - ._create_filtered_curves_data
 - .update_variable_reorder
 - PLVisualization
@@ -113,7 +111,7 @@
 - PlotManager
 - InfoUI
 - ChebyshevBackgroundModel
-- uvvis_merger_module.py
+- SobolSampling
 - ._render_batch
 - SaveUI
 - WidgetFactory
@@ -123,23 +121,21 @@
 - How to use
 - ._make_move_up_handler
 - ChemicalSolutionCalculator.py
-- .__init__
+- .setup_callbacks
 - ._init_batch_selection
 - .display
 - Plotter
 - README.md
 - Wetting_envelope/README.md
-- re
-- ._init_ui_components
 - _extract_xrd_arrays
 - CLAUDE.md
-- .on_file_upload
+- ._update_wavelength_range_on_spectrum
 - add_diagnostic_button_to_app
 - LoadingProgress
-- access_token.py
 - ToggleBatchProcess
 - ColorUtils
 - batch_selection_EQE.py
+- ._on_auth_success
 
 ## God Nodes (most connected - your core abstractions)
 1. `JVAnalysisApp` - 54 edges
@@ -156,19 +152,19 @@
 ## Surprising Connections (you probably didn't know these)
 - `AbsPLAppController` --uses--> `AuthenticationManager`  [INFERRED]
   AbsPL_Analysis/app_controller_abspl.py → auth_manager.py
+- `AbsPLAppController` --uses--> `AuthenticationUI`  [INFERRED]
+  AbsPL_Analysis/app_controller_abspl.py → auth_ui.py
 - `create_batch_selection()` --calls--> `get_batch_ids()`  [INFERRED]
   EQE-Curve_Analysis/batch_selection_EQE.py → api_calls.py
 - `JVAnalysisApp` --uses--> `ErrorHandler`  [INFERRED]
   JV-Analysis_v6/app_controller_JV.py → error_handler.py
 - `DataManager` --uses--> `ErrorHandler`  [INFERRED]
   JV-Analysis_v6/data_manager_JV.py → error_handler.py
-- `ProcessJVOverviewApp` --uses--> `AuthenticationUI`  [INFERRED]
-  Process_JV_Overview/app_controller_ProcessJV.py → auth_ui.py
 
 ## Import Cycles
 - None detected.
 
-## Communities (170 total, 127 thin omitted)
+## Communities (166 total, 129 thin omitted)
 
 ### Community 0 - "MinimalistExperimentBuilder"
 Cohesion: 0.05
@@ -176,15 +172,15 @@ Nodes (11): ExperimentExcelBuilder, add_guide_sheet(), add_experiment_sheet(), g
 
 ### Community 1 - "requests"
 Cohesion: 0.05
-Nodes (29): get_all_eqe(), get_all_JV(), get_all_measurements_except_JV(), get_all_mppt(), get_all_uploads(), get_all_xrd(), get_batch_ids(), get_efficiencies() (+21 more)
+Nodes (33): get_token(), get_all_batches_wth_data(), get_all_eqe(), get_all_JV(), get_all_measurements_except_JV(), get_all_mppt(), get_all_uploads(), get_all_xrd() (+25 more)
 
 ### Community 2 - "numpy"
-Cohesion: 0.09
-Nodes (12): calculate_activity_coefficients_unifac(), calculate_overall_donor_number_with_unifac(), parse_smiles_to_unifac_groups(), calculate_activity_coefficients_unifac(), calculate_overall_donor_number_with_unifac(), parse_smiles_to_unifac_groups(), merge_process(), merge_step_data() (+4 more)
+Cohesion: 0.05
+Nodes (14): Constants, format_percentage(), generate_experiment_id(), truncate_string(), calculate_activity_coefficients_unifac(), calculate_overall_donor_number_with_unifac(), parse_smiles_to_unifac_groups(), calculate_activity_coefficients_unifac() (+6 more)
 
 ### Community 3 - "app_controller_JV.py"
-Cohesion: 0.08
-Nodes (4): _load_pptxgenjs(), create_resizable_plot(), display_resizable_plot(), test_resizable_plot()
+Cohesion: 0.06
+Nodes (7): create_batch_selection(), extract_date(), sort_by_date_desc(), test_resizable_plot(), create_resizable_plot(), display_resizable_plot(), test_resizable_plot()
 
 ### Community 4 - "AbsPLGUIComponents"
 Cohesion: 0.06
@@ -194,17 +190,17 @@ Nodes (7): AbsPLGUIComponents, _parse_curve_bound(), remove_row(), _render_fit_c
 Cohesion: 0.05
 Nodes (5): DataProcessor, ExperimentalDesignUtils, FileHandler, safe_float_conversion(), ValidationUtils
 
-### Community 6 - "AuthenticationUI"
-Cohesion: 0.05
-Nodes (9): AbsPLAppController, launch_abspl_app(), AbsPLDataManager, extract_description_notes(), create_resizable_plot(), display_resizable_plot(), ResizablePlotManager, ResizablePlotWidget (+1 more)
+### Community 6 - "AbsPLAppController"
+Cohesion: 0.06
+Nodes (8): AbsPLAppController, launch_abspl_app(), AbsPLDataManager, extract_description_notes(), create_resizable_plot(), display_resizable_plot(), ResizablePlotManager, ResizablePlotWidget
 
 ### Community 8 - "ColorSchemeSelector"
-Cohesion: 0.05
-Nodes (6): ColorSchemeSelector, SaveUI, create_resizable_plot(), display_resizable_plot(), ResizablePlotManager, ResizablePlotWidget
+Cohesion: 0.06
+Nodes (5): ColorSchemeSelector, SaveUI, create_resizable_plot(), display_resizable_plot(), ResizablePlotWidget
 
 ### Community 9 - "utils_JV.py"
-Cohesion: 0.06
-Nodes (14): clean_filename(), create_new_results_folder(), generate_detailed_export_excel(), is_running_in_jupyter(), save_full_data_frame(), clean_filename(), create_new_results_folder(), generate_detailed_export_excel() (+6 more)
+Cohesion: 0.05
+Nodes (14): clean_filename(), create_new_results_folder(), is_running_in_jupyter(), save_full_data_frame(), clean_filename(), create_new_results_folder(), generate_detailed_export_excel(), is_running_in_jupyter() (+6 more)
 
 ### Community 11 - "fitting_tools_MPPt.py"
 Cohesion: 0.07
@@ -212,7 +208,7 @@ Nodes (24): calculate_ley(), erfc_linear(), erfc_params(), extrapolate(), find_T
 
 ### Community 12 - "sampling_algorithms.py"
 Cohesion: 0.06
-Nodes (4): OrthogonalArraySampling, RandomSampling, SamplingAlgorithm, UniformGridSampling
+Nodes (5): HaltonSampling, OrthogonalArraySampling, RandomSampling, SamplingAlgorithm, UniformGridSampling
 
 ### Community 16 - "DataManager"
 Cohesion: 0.05
@@ -222,17 +218,17 @@ Nodes (4): DataManager, _norm_cycle(), _norm_text(), should_include_curve()
 Cohesion: 0.08
 Nodes (3): DragDropMultiUploadWidget, DragDropUploadWidget, update_list()
 
-### Community 25 - "app_controller_ProcessJV.py"
-Cohesion: 0.07
-Nodes (10): extract_cycle_info(), get_all_batches_wth_data(), create_batch_selection(), extract_date(), sort_by_date_desc(), format_error(), get_batches_with_uploads(), get_upload_ids_with_entries() (+2 more)
+### Community 25 - "os"
+Cohesion: 0.08
+Nodes (6): extract_cycle_info(), log_notebook_usage(), ResizablePlotManager, get_axes_from_extent(), sanitize_array(), sanitize_float()
 
 ### Community 28 - "UVVisAnalysisApp"
 Cohesion: 0.11
 Nodes (3): UVVisAnalysisApp, UVVisAuthenticationUI, UVVisSaveUI
 
-### Community 30 - "iv_converter_module.py"
-Cohesion: 0.16
-Nodes (8): extract_channel_from_block(), extract_metadata(), format_old_file(), parse_sample_blocks(), parse_scan(), process_files(), process_single_file(), process_zip_file()
+### Community 30 - "io"
+Cohesion: 0.05
+Nodes (24): extract_x_y(), get_oldest_file_date(), process_files(), process_zip_file(), rename_files(), create_download_zip(), extract_channel_from_block(), extract_metadata() (+16 more)
 
 ### Community 35 - "WidgetFactory"
 Cohesion: 0.10
@@ -247,28 +243,16 @@ Cohesion: 0.17
 Nodes (8): _build_legend_annotation(), _build_mj_legend_annotation(), _compute_cumulative_jsc_am15g(), _compute_group_stats(), create_eqe_figure(), _format_ann_val(), _get_am15g(), _positions_label()
 
 ### Community 55 - "ResizablePlotManager"
-Cohesion: 0.12
-Nodes (5): create_resizable_plot(), display_resizable_plot(), ResizablePlotManager, ResizablePlotWidget, test_resizable_plot()
-
-### Community 57 - "DesignOfExperiments/utils.py"
-Cohesion: 0.09
-Nodes (4): Constants, format_percentage(), generate_experiment_id(), truncate_string()
+Cohesion: 0.13
+Nodes (4): create_resizable_plot(), display_resizable_plot(), ResizablePlotManager, ResizablePlotWidget
 
 ### Community 67 - "plot_manager_JV.py"
-Cohesion: 0.20
+Cohesion: 0.12
 Nodes (4): _flatten_multiindex_columns(), plot_list_from_voila(), plotting_string_action(), save_combined_excel_data()
 
-### Community 71 - "plot_manager_ProcessJV.py"
-Cohesion: 0.10
-Nodes (4): _flatten_multiindex_columns(), plot_list_from_voila(), plotting_string_action(), save_combined_excel_data()
-
-### Community 72 - "io"
-Cohesion: 0.23
-Nodes (5): filter_soak_files(), process_files(), process_mpp_files(), process_zip_file(), rename_jv_files()
-
-### Community 73 - "eqe_split_module.py"
-Cohesion: 0.21
-Nodes (5): create_download_zip(), format_eqe_output(), generate_filename(), parse_eqe_file(), process_eqe_file()
+### Community 73 - "process_eqe_file"
+Cohesion: 0.25
+Nodes (4): format_eqe_output(), generate_filename(), parse_eqe_file(), process_eqe_file()
 
 ### Community 75 - "._create_condition_selector"
 Cohesion: 0.23
@@ -282,17 +266,13 @@ Nodes (5): debug_print(), format_timestamp(), generate_output_filename(), safe_d
 Cohesion: 0.05
 Nodes (5): variation_from_identifier(), DataManager, _norm_cycle(), _norm_text(), should_include_curve()
 
-### Community 82 - "ResizablePlotManager"
-Cohesion: 0.22
+### Community 82 - ".display"
+Cohesion: 0.15
 Nodes (4): create_resizable_plot(), display_resizable_plot(), ResizablePlotManager, ResizablePlotWidget
 
 ### Community 86 - "AbsPL: Sweep vs. Single PL – Unterscheidung"
 Cohesion: 0.20
 Nodes (9): AbsPL: Sweep vs. Single PL – Unterscheidung, Dateiformat-Unterschiede, Empfohlener Check im Archiv, Kontext, Schnellster Datei-Typ-Check, Single PL (`_FD7.abspl.txt`), Sweep (`_D1.abspl.txt`), Unterschiede im gespeicherten Archiv (auf dem Server) (+1 more)
-
-### Community 88 - "zipfile"
-Cohesion: 0.25
-Nodes (4): get_oldest_file_date(), process_files(), process_zip_file(), rename_files()
 
 ### Community 90 - "generate_jv_pptx_bytes"
 Cohesion: 0.22
@@ -306,29 +286,17 @@ Nodes (9): 1. Batch Selection, 2. Sample Selection, 3. Curve Fitting, 4. Plottin
 Cohesion: 0.28
 Nodes (3): _norm_cycle(), _norm_text(), should_include_curve()
 
-### Community 103 - "LatinHypercubeSampling"
-Cohesion: 0.09
-Nodes (3): HaltonSampling, LatinHypercubeSampling, SobolSampling
-
-### Community 112 - "uvvis_merger_module.py"
-Cohesion: 0.29
-Nodes (3): find_matching_pairs(), merge_uvvis_files(), process_uvvis_files()
-
 ### Community 113 - "._render_batch"
-Cohesion: 0.29
-Nodes (3): count_samples(), format_date(), plural()
+Cohesion: 0.24
+Nodes (3): count_samples(), format_date(), format_error()
+
+### Community 114 - "SaveUI"
+Cohesion: 0.15
+Nodes (4): add_diagnostic_button_to_app(), _on_mj_click(), diagnose_multijunction(), SaveUI
 
 ### Community 121 - "How to use"
 Cohesion: 0.33
 Nodes (5): 1. Select the batches containing the data you want to analyze., 2. Dataset Names, 3. model fitting, 4. create plots, How to use
-
-### Community 150 - "re"
-Cohesion: 0.33
-Nodes (3): extract_x_y(), parse_filename_base(), process_pt_file()
-
-### Community 152 - "._init_ui_components"
-Cohesion: 0.29
-Nodes (3): add_diagnostic_button_to_app(), _on_mj_click(), diagnose_multijunction()
 
 ### Community 153 - "_extract_xrd_arrays"
 Cohesion: 0.67
@@ -342,15 +310,19 @@ Nodes (3): add_diagnostic_button_to_app(), on_diagnose_click(), diagnose_directi
 Cohesion: 0.32
 Nodes (3): create_batch_selection(), extract_date(), sort_by_date_desc()
 
+### Community 172 - "._on_auth_success"
+Cohesion: 0.20
+Nodes (3): get_batches_with_uploads(), get_upload_ids_with_entries(), parse_batch_id()
+
 ## Knowledge Gaps
 - **21 isolated node(s):** `Kontext`, `Single PL (`_FD7.abspl.txt`)`, `Sweep (`_D1.abspl.txt`)`, `Schnellster Datei-Typ-Check`, `Empfohlener Check im Archiv` (+16 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1271 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **127 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 1270 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **129 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `JVAnalysisApp` connect `JVAnalysisApp` to `._create_debug_dashboard`, `requests`, `app_controller_JV.py`, `EnhancedJVCurveAnalysisUI`, `DataManager`, `.display`, `FilterUI`, `PlotUI`, `ColorSchemeSelector`, `._on_create_curve_analysis_plot`, `._on_create_plots`, `ResizablePlotManager`, `FontSizeUI`, `SaveUI`, `PlotManager`, `._create_filtered_curves_data`, `._make_variables_menu`, `._build_theresa_jv_plot`, `InfoUI`?**
+- **Why does `JVAnalysisApp` connect `JVAnalysisApp` to `._create_debug_dashboard`, `requests`, `app_controller_JV.py`, `EnhancedJVCurveAnalysisUI`, `DataManager`, `.display`, `FilterUI`, `PlotUI`, `ColorSchemeSelector`, `._on_create_plots`, `ResizablePlotManager`, `generate_detailed_export_excel`, `FontSizeUI`, `SaveUI`, `PlotManager`, `._create_filtered_curves_data`, `._make_variables_menu`, `._build_theresa_jv_plot`, `InfoUI`?**
   _High betweenness centrality (0.111) - this node is a cross-community bridge._
 - **Are the 11 inferred relationships involving `JVAnalysisApp` (e.g. with `ErrorHandler` and `DataManager`) actually correct?**
   _`JVAnalysisApp` has 11 INFERRED edges - model-reasoned connections that need verification._
@@ -358,9 +330,9 @@ _Questions this graph is uniquely positioned to answer:_
   _21 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `MinimalistExperimentBuilder` be split into smaller, more focused modules?**
   _Cohesion score 0.053005464480874315 - nodes in this community are weakly interconnected._
-- **Why does `GUIComponents` connect `GUIComponents` to `.create_seed_configurator`, `.create_download_link`, `plot_manager_ProcessJV.py`, `Widget`, `.set_current_data`, `._create_variable_widget`, `.get_variables_from_widgets`, `.update_metrics_display`?**
+- **Why does `GUIComponents` connect `GUIComponents` to `.create_seed_configurator`, `.create_download_link`, `utils_JV.py`, `Widget`, `.set_current_data`, `._create_variable_widget`, `.get_variables_from_widgets`, `.update_metrics_display`?**
   _High betweenness centrality (0.091) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `PLAnalysisApp` (e.g. with `ResultExporter` and `FittingEngine`) actually correct?**
   _`PLAnalysisApp` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **Should `requests` be split into smaller, more focused modules?**
-  _Cohesion score 0.05146242132543503 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.045987654320987656 - nodes in this community are weakly interconnected._
